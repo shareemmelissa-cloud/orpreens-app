@@ -849,37 +849,83 @@ const SUPABASE_URL='https://jnmguvnsuqqggvqqgltz.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpubWd1dm5zdXFxZ2d2cXFnbHR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5MjQyNTgsImV4cCI6MjEwNDUwMDI1OH0.vsP1bsuWta7TXYL1WxoxYjB4-w3TLG-8C1VwiOzp7LI';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
-function uid(){
-  if(window.crypto&&crypto.randomUUID) return crypto.randomUUID();
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16);});
+// Campos de un item que tienen su propia columna en la tabla "items".
+// Todo lo que NO esté en esta lista se guarda dentro de la columna "extra" (jsonb),
+// así nunca perdemos datos aunque el esquema no tenga columna para algo puntual.
+const ITEM_COLS=['codigo','cliente','ubicacion','sexo','cantidad','soloMitad','tpant','spant','cpant','cpantFab','dpant','ttop','stop','ctop','ctopFab','dtop','crem','llevaTex','textoCount','llevaLog','logoCount','paso','msgs','fotos','vendor'];
+const BORD_COLS=['llevaBordGorro'];
+for(let i=1;i<=4;i++){['v','u','c'].forEach(f=>BORD_COLS.push('t'+i+f));['n','u','c'].forEach(f=>BORD_COLS.push('l'+i+f));}
+
+function itemToRow(o){
+  const bordado={};BORD_COLS.forEach(k=>{if(o[k]!==undefined&&o[k]!=='')bordado[k]=o[k];});
+  const extra={};
+  Object.keys(o).forEach(k=>{if(!ITEM_COLS.includes(k)&&!BORD_COLS.includes(k))extra[k]=o[k];});
+  return {
+    codigo:o.codigo||null, cliente:o.cliente||null, ubicacion:o.ubicacion||null, sexo:o.sexo||null,
+    cantidad:(o.cantidad!==undefined&&o.cantidad!==null&&o.cantidad!=='')?Number(o.cantidad):null,
+    solo_mitad:o.soloMitad||null,
+    tpant:o.tpant||null, spant:o.spant||null, cpant:o.cpant||null, cpant_fab:o.cpantFab||null, dpant:o.dpant||null,
+    ttop:o.ttop||null, stop:o.stop||null, ctop:o.ctop||null, ctop_fab:o.ctopFab||null, dtop:o.dtop||null,
+    crem:o.crem||null,
+    lleva_tex:o.llevaTex||null, texto_count:o.textoCount||null,
+    lleva_log:o.llevaLog||null, logo_count:o.logoCount||null,
+    bordado, paso:(typeof o.paso==='number')?o.paso:0,
+    msgs:o.msgs||[], fotos:o.fotos||[], vendor:o.vendor||null,
+    extra
+  };
+}
+function rowToItem(row){
+  return {
+    ...(row.extra||{}), ...(row.bordado||{}),
+    codigo:row.codigo, cliente:row.cliente, ubicacion:row.ubicacion, sexo:row.sexo,
+    cantidad:row.cantidad, soloMitad:row.solo_mitad,
+    tpant:row.tpant, spant:row.spant, cpant:row.cpant, cpantFab:row.cpant_fab, dpant:row.dpant,
+    ttop:row.ttop, stop:row.stop, ctop:row.ctop, ctopFab:row.ctop_fab, dtop:row.dtop,
+    crem:row.crem,
+    llevaTex:row.lleva_tex, textoCount:row.texto_count,
+    llevaLog:row.lleva_log, logoCount:row.logo_count,
+    paso:row.paso, msgs:row.msgs||[], fotos:row.fotos||[], vendor:row.vendor
+  };
+}
+function pedidoToRow(ped){
+  const {items,num,vendor,fecha,urgente,guia,guiaFoto,...resto}=ped;
+  return {numero:String(num), vendor, fecha:fecha||null, urgente:!!urgente, guia:guia||null, guia_foto:guiaFoto||null, detalle:resto};
+}
+function rowToPedido(row,items){
+  const numRaw=row.numero;
+  const num=/^\d+$/.test(numRaw||'')?Number(numRaw):numRaw;
+  return {...(row.detalle||{}), num, vendor:row.vendor, fecha:row.fecha, urgente:row.urgente, guia:row.guia, guiaFoto:row.guia_foto, items};
 }
 
-// Convierte lo que hay hoy en memoria (pedidosVend) al formato de las tablas
-// pedidos/items y lo sube a Supabase. Se llama cada vez que se guarda algo.
+// Sube el estado actual de pedidosVend a Supabase (se llama cada vez que se guarda algo).
 let _syncEnCurso=false,_syncPendiente=false;
 async function syncPedidosASupabase(){
   if(_syncEnCurso){_syncPendiente=true;return;}
   _syncEnCurso=true;
   try{
-    const filasPedidos=[],filasItems=[];
+    const filasPedidos=[],grupos=[];
     Object.keys(pedidosVend).forEach(vendor=>{
       (pedidosVend[vendor]||[]).forEach(ped=>{
-        if(!ped.local_id) ped.local_id=uid();
-        const {items,local_id,...resto}=ped;
-        filasPedidos.push({local_id,vendor,num:ped.num,detalle:resto});
-        (items||[]).forEach(it=>{
-          if(!it.local_id) it.local_id=uid();
-          const {local_id:itLocalId,...restoItem}=it;
-          filasItems.push({local_id:itLocalId,pedido_local_id:local_id,detalle:restoItem});
-        });
+        filasPedidos.push(pedidoToRow(ped));
+        grupos.push({vendor,numero:String(ped.num),items:ped.items||[]});
       });
     });
-    if(filasPedidos.length){
-      const {error:e1}=await sb.from('pedidos').upsert(filasPedidos,{onConflict:'local_id'});
-      if(e1) console.error('Error sincronizando pedidos:',e1);
-    }
+    if(!filasPedidos.length) return;
+    const {data:pedRows,error:e1}=await sb.from('pedidos').upsert(filasPedidos,{onConflict:'vendor,numero'}).select('id,vendor,numero');
+    if(e1){console.error('Error sincronizando pedidos:',e1);return;}
+    const idMap={};
+    (pedRows||[]).forEach(r=>{idMap[r.vendor+'||'+r.numero]=r.id;});
+    const filasItems=[];
+    grupos.forEach(({vendor,numero,items})=>{
+      const pedido_id=idMap[vendor+'||'+numero];
+      if(!pedido_id) return;
+      items.forEach(it=>{
+        if(!it.codigo) return; // sin código todavía no se puede sincronizar de forma segura
+        filasItems.push({...itemToRow(it),pedido_id});
+      });
+    });
     if(filasItems.length){
-      const {error:e2}=await sb.from('items').upsert(filasItems,{onConflict:'local_id'});
+      const {error:e2}=await sb.from('items').upsert(filasItems,{onConflict:'codigo'});
       if(e2) console.error('Error sincronizando items:',e2);
     }
   }catch(err){
@@ -897,23 +943,16 @@ async function cargarPedidosDesdeSupabase(){
     if(e1){console.error('Error cargando pedidos:',e1);return;}
     const {data:items,error:e2}=await sb.from('items').select('*');
     if(e2){console.error('Error cargando items:',e2);return;}
-    const itemsPorPedido={};
+    const itemsPorPedidoId={};
     (items||[]).forEach(row=>{
-      if(!itemsPorPedido[row.pedido_local_id]) itemsPorPedido[row.pedido_local_id]=[];
-      itemsPorPedido[row.pedido_local_id].push({...row.detalle,local_id:row.local_id});
+      if(!itemsPorPedidoId[row.pedido_id]) itemsPorPedidoId[row.pedido_id]=[];
+      itemsPorPedidoId[row.pedido_id].push(rowToItem(row));
     });
     const nuevo={};
     (peds||[]).forEach(row=>{
       if(!nuevo[row.vendor]) nuevo[row.vendor]=[];
-      nuevo[row.vendor].push({
-        ...row.detalle,
-        num:row.num,
-        vendor:row.vendor,
-        local_id:row.local_id,
-        items:itemsPorPedido[row.local_id]||[]
-      });
+      nuevo[row.vendor].push(rowToPedido(row,itemsPorPedidoId[row.id]||[]));
     });
-    // Reemplazar contenido de pedidosVend sin perder la referencia del objeto
     Object.keys(pedidosVend).forEach(k=>delete pedidosVend[k]);
     Object.assign(pedidosVend,nuevo);
     localStorage.setItem('orpreens_pedidos',JSON.stringify(pedidosVend)); // caché local de respaldo
@@ -922,14 +961,13 @@ async function cargarPedidosDesdeSupabase(){
   }
 }
 // Promesa que se resuelve cuando la primera carga desde Supabase terminó.
-// Cualquier pantalla que necesite pedidos ya cargados debe esperar esto.
 const pedidosReady=cargarPedidosDesdeSupabase();
 
 async function borrarPedidosEnSupabase(){
   try{
-    const {error:e1}=await sb.from('items').delete().neq('local_id','__none__');
+    const {error:e1}=await sb.from('items').delete().not('id','is',null);
     if(e1) console.error('Error borrando items en Supabase:',e1);
-    const {error:e2}=await sb.from('pedidos').delete().neq('local_id','__none__');
+    const {error:e2}=await sb.from('pedidos').delete().not('id','is',null);
     if(e2) console.error('Error borrando pedidos en Supabase:',e2);
   }catch(err){console.error('Error borrando datos en Supabase:',err);}
 }
