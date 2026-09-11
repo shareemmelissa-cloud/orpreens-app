@@ -4,6 +4,183 @@
 <meta charset="UTF-8">
 <meta name="view
 // ══ CÓDIGOS DE ITEM ══
+function exportarExcelCorte(){
+  if(typeof XLSX==='undefined'){alert('No se pudo cargar la librería de Excel. Revisa tu conexión e intenta de nuevo.');return;}
+  const lote=prompt('Lote de corte (columna LIST, ej: J.2):','')||'';
+  const allPeds=getAllPedidos();
+  const headers=['LUG','LOGO','TEXTO','VEND','CLIENTE','SE','QT','PANT','STYLE','COLOR','DESCRIP. PANT','REM','CORD','CODIGO','LIST','STYLE','TOP2','COLOR','DESCRIPCION TOP','BORDA','AJUS/DE','COMISION','PRECIO'];
+  const filas=[headers];
+  allPeds.forEach(ped=>{
+    (ped.items||[]).forEach(o=>{
+      const tc=o.textoCount||1,lc=o.logoCount||1;
+      const textos=o.llevaTex==='Si'?[...Array(tc)].map((_,i)=>o['t'+(i+1)+'v']).filter(Boolean).join(', '):'';
+      const logos=o.llevaLog==='Si'?[...Array(lc)].map((_,i)=>o['l'+(i+1)+'n']).filter(Boolean).join(', '):'';
+      const llevaBorda=(o.llevaTex==='Si'||o.llevaLog==='Si')?'SI':'';
+      const pr=(typeof calcPrecio==='function')?calcPrecio(o):null;
+      filas.push([
+        o.ubicacion||'', logos, textos, o.vendor||ped.vendor||'', o.cliente||'',
+        o.sexo||'', o.cantidad||1,
+        o.tpant||'', o.spant||'', o.cpant||'', o.dpant||'',
+        o.crem||'', o.ccord||'', o.codigo||'', lote,
+        o.stop||'', o.ttop||'', o.ctop||'', o.dtop||'',
+        llevaBorda, '', '', pr?pr.total:''
+      ]);
+    });
+  });
+  const ws=XLSX.utils.aoa_to_sheet(filas);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Corte');
+  const fecha=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`CORTE_ORPREENS_${fecha}.xlsx`);
+}
+function siguienteCodigoUR(){
+  const todos=getAllPedidos().flatMap(p=>p.items||[]);
+  let max=0;
+  todos.forEach(o=>{
+    const m=/^UR(\d+)$/i.exec((o.codigo||'').trim());
+    if(m){const n=parseInt(m[1]);if(n>max)max=n;}
+  });
+  return 'UR'+(max+1);
+}
+function abrirModalUR(){
+  let m=document.getElementById('ur-modal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='ur-modal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px';
+    m.innerHTML=`<div style="background:#fff;border-radius:16px;padding:24px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-height:90vh;overflow-y:auto">
+      <div style="font-size:16px;font-weight:700;color:#dc2626;margin-bottom:4px">⚡ Nuevo pedido urgente (UR)</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:18px">Se le cobrará al vendedor que elijas. El código será <b id="ur-codigo-preview"></b> y aparecerá en rojo en la lista de Corte.</div>
+
+      <div class="lbl">Vendedor a quien se le cobrará</div>
+      <select id="ur-vendor" class="inp">${VENDORS.map(v=>`<option value="${v.code}">${v.code}</option>`).join('')}</select>
+
+      <div class="lbl">Cliente</div>
+      <input id="ur-cliente" class="inp" placeholder="Nombre del cliente">
+      <div class="lbl">Ubicación</div>
+      <input id="ur-ubicacion" class="inp" placeholder="Ej: Hospital, empresa...">
+      <div class="lbl">Sexo</div>
+      <select id="ur-sexo" class="inp"><option value="F">F</option><option value="H">H</option></select>
+      <div class="lbl">Cantidad</div>
+      <input id="ur-cantidad" class="inp" type="number" step="0.5" min="0.5" value="1">
+      <div class="lbl">¿Qué incluye?</div>
+      <select id="ur-solomitad" class="inp">
+        <option value="">Top y Pantalón</option>
+        <option value="top">Solo Top</option>
+        <option value="pant">Solo Pantalón</option>
+      </select>
+
+      <div id="ur-pant-block" style="margin-top:6px">
+        <div style="font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Pantalón</div>
+        <input id="ur-tpant" class="inp" placeholder="Talla pantalón">
+        <input id="ur-spant" class="inp" placeholder="Estilo pantalón">
+        <input id="ur-cpant" class="inp" placeholder="Color pantalón (código)">
+        <textarea id="ur-dpant" class="inp" style="min-height:50px" placeholder="Descripción extra pantalón"></textarea>
+      </div>
+      <div id="ur-top-block" style="margin-top:6px">
+        <div style="font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Top / Camisa</div>
+        <input id="ur-ttop" class="inp" placeholder="Talla top">
+        <input id="ur-stop" class="inp" placeholder="Estilo top">
+        <input id="ur-ctop" class="inp" placeholder="Color top (código)">
+        <textarea id="ur-dtop" class="inp" style="min-height:50px" placeholder="Descripción extra top"></textarea>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button onclick="cerrarModalUR()" style="flex:1;padding:11px;border-radius:var(--radius-sm);border:1.5px solid var(--border2);background:#fff;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif">Cancelar</button>
+        <button onclick="guardarUR()" style="flex:1;padding:11px;border-radius:var(--radius-sm);border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif">Crear pedido UR</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click',ev=>{if(ev.target===m)cerrarModalUR();});
+    document.getElementById('ur-solomitad').addEventListener('change',function(){
+      const v=this.value;
+      document.getElementById('ur-pant-block').style.display=(v==='top')?'none':'';
+      document.getElementById('ur-top-block').style.display=(v==='pant')?'none':'';
+    });
+  }
+  document.getElementById('ur-codigo-preview').textContent=siguienteCodigoUR();
+  m.style.display='flex';
+}
+function cerrarModalUR(){
+  const m=document.getElementById('ur-modal');if(m)m.style.display='none';
+}
+function guardarUR(){
+  const vendor=document.getElementById('ur-vendor').value;
+  const cliente=document.getElementById('ur-cliente').value.trim();
+  if(!cliente){alert('Escribe el nombre del cliente.');return;}
+  const soloMitad=document.getElementById('ur-solomitad').value||null;
+  const codigo=siguienteCodigoUR();
+  const item={
+    codigo, cliente,
+    ubicacion:document.getElementById('ur-ubicacion').value.trim(),
+    sexo:document.getElementById('ur-sexo').value,
+    cantidad:parseFloat(document.getElementById('ur-cantidad').value)||1,
+    soloMitad,
+    tpant:document.getElementById('ur-tpant').value.trim().toUpperCase(),
+    spant:document.getElementById('ur-spant').value.trim().toUpperCase(),
+    cpant:document.getElementById('ur-cpant').value.trim().toUpperCase(),
+    dpant:document.getElementById('ur-dpant').value.trim().toUpperCase(),
+    ttop:document.getElementById('ur-ttop').value.trim().toUpperCase(),
+    stop:document.getElementById('ur-stop').value.trim().toUpperCase(),
+    ctop:document.getElementById('ur-ctop').value.trim().toUpperCase(),
+    dtop:document.getElementById('ur-dtop').value.trim().toUpperCase(),
+    paso:0, vendor, msgs:[], fotos:[]
+  };
+  const num=siguienteNumeroPedido(vendor);
+  const nuevoPedido={num,vendor,fecha:new Date().toLocaleDateString('es-HN'),items:[item]};
+  if(!pedidosVend[vendor]) pedidosVend[vendor]=[];
+  pedidosVend[vendor].push(nuevoPedido);
+  savePedidos();
+  cerrarModalUR();
+  alert('✓ Pedido urgente '+codigo+' creado y asignado a '+vendor+'.');
+  if(typeof renderAdminCorte==='function') renderAdminCorte();
+  if(typeof renderAdmin==='function') renderAdmin();
+}
+function solicitarPatron(vendor,pedNum,itemIdx){
+  const peds=pedidosVend[vendor]||[];
+  const ped=peds.find(p=>p.num===pedNum);
+  if(!ped) return;
+  const o=ped.items[itemIdx];if(!o)return;
+  const nota=prompt('¿Alguna nota para el diseñador? (opcional)','')||'';
+  o.patronPendiente=true;
+  o.patronNota=nota;
+  savePedidos();
+  renderCorte();
+  sb.from('chat_interno').insert({autor:'Corte (auto)',rol:'c',texto:`🧵 Se necesita patrón/diseño para ${o.codigo||'—'} · ${o.cliente||'—'} (Pedido #${pedNum}, ${vendor})${nota?' — Nota: '+nota:''}`}).then(()=>{}).catch(()=>{});
+}
+function marcarPatronListo(vendor,pedNum,itemIdx){
+  const peds=pedidosVend[vendor]||[];
+  const ped=peds.find(p=>p.num===pedNum);
+  if(!ped) return;
+  const o=ped.items[itemIdx];if(!o)return;
+  o.patronPendiente=false;
+  savePedidos();
+  renderDiseno();
+  sb.from('chat_interno').insert({autor:'Diseñador (auto)',rol:'d',texto:`✅ Patrón/diseño listo para ${o.codigo||'—'} · ${o.cliente||'—'} (Pedido #${pedNum}, ${vendor})`}).then(()=>{}).catch(()=>{});
+}
+function renderDiseno(){
+  const tbody=document.getElementById('diseno-tbody');
+  if(!tbody) return;
+  const allPeds=getAllPedidos();
+  const pendientes=[];
+  allPeds.forEach(ped=>{
+    (ped.items||[]).forEach((o,ii)=>{
+      if(o.patronPendiente) pendientes.push({...o,_pedNum:ped.num,_ii:ii,_vendor:ped.vendor});
+    });
+  });
+  if(!pendientes.length){
+    tbody.innerHTML='<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--muted2)">No hay solicitudes de patrón pendientes 🎉</td></tr>';
+    return;
+  }
+  tbody.innerHTML=pendientes.map(o=>`<tr>
+    <td><span class="cod-badge">${o.codigo||'—'}</span><br><span style="font-family:monospace;font-size:10px;color:#fcd34d">#${o._pedNum}</span></td>
+    <td><b>${o.cliente||'—'}</b></td>
+    <td><span class="${vtCls(o._vendor)}">${o._vendor||'—'}</span></td>
+    <td style="font-size:12px;color:#6b7280">${o.patronNota||'—'}</td>
+    <td><button class="pbtn pbtn-bordado" onclick="marcarPatronListo('${o._vendor}',${o._pedNum},${o._ii})">✓ Patrón listo</button></td>
+  </tr>`).join('');
+}
+
 function editarCodigoItem(vendor,pedNum,itemIdx){
   const peds=pedidosVend[vendor]||[];
   const ped=peds.find(p=>p.num===pedNum);
@@ -90,7 +267,7 @@ port" content="width=device-width, initial-scale=1.0">
   --shadow-md:0 4px 12px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.04);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;zoom:1.12}
 .screen{display:none;min-height:100vh;flex-direction:column}
 .screen.show{display:flex}
 
@@ -468,6 +645,7 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
       <button class="rtab" onclick="setRole('c',this)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 18h1"/><path d="M12 18h1"/><path d="M7 18h1"/></svg> Producción</button>
       <button class="rtab" onclick="setRole('b',this)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22V3"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/><path d="M8 5.2A10 10 0 0 1 22 12"/><path d="M2 12a10 10 0 0 1 14-9.2"/></svg> Bordado</button>
       <button class="rtab" onclick="setRole('a',this)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg> Admin</button>
+      <button class="rtab" onclick="setRole('d',this)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg> Diseñador</button>
     </div>
     <div id="vwrap">
       <label class="lbl">Código de vendedor</label>
@@ -631,6 +809,25 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
   </div>
 </div>
 
+<!-- DISEÑADOR -->
+<div id="s-diseno" class="screen">
+  <div class="topbar">
+    <div class="tlogo" style="background:#7c3aed"><svg class="" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg></div>
+    <div><div class="ttitle">Orpreens Scrubs</div><div class="trole" style="color:#9ca3af">Diseñador</div></div>
+    <div class="tright"><button class="tbtn" onclick="logout()"><svg class="ico ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Salir</button></div>
+  </div>
+  <div style="padding:16px">
+    <div style="font-size:17px;font-weight:700;margin-bottom:4px;color:#111827">Patrones/diseños pendientes</div>
+    <div style="font-size:13px;color:#6b7280;margin-bottom:16px">Corte marca aquí cuando falta un patrón o diseño nuevo</div>
+    <div class="table-wrap">
+      <table class="corte-tbl">
+        <thead><tr><th>Código/Pedido</th><th>Cliente</th><th>Vend.</th><th>Nota de Corte</th><th>Acciones</th></tr></thead>
+        <tbody id="diseno-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- ADMIN -->
 <div id="s-admin" class="screen">
   <div class="topbar">
@@ -642,6 +839,8 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
     <button class="ntab on" onclick="aTab('d',this)">Dashboard</button>
     <button class="ntab" onclick="aTab('t',this)">Listas</button>
     <button class="ntab" onclick="aTab('p',this)">Producción</button>
+    <button class="ntab" onclick="aTab('bo',this)">Bordado</button>
+    <button class="ntab" onclick="aTab('lt',this)">Lotes</button>
     <button class="ntab" onclick="aTab('v',this)">Por vendedor</button>
     <button class="ntab" onclick="aTab('g',this)">Gráficas</button>
     <button class="ntab" onclick="aTab('c',this)">Calendario</button>
@@ -683,6 +882,8 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
         <option value="">Vendedor: Todos</option>
       </select>
       <button onclick="limpiarFiltrosAdmin()" style="padding:8px 14px;border-radius:6px;background:#fff7ed;border:1.5px solid #fed7aa;color:#c2410c;font-size:12px;cursor:pointer;font-family:Inter,sans-serif;font-weight:500">Limpiar filtros</button>
+      <button onclick="abrirModalUR()" style="padding:8px 14px;border-radius:6px;background:#fee2e2;border:1.5px solid #fecaca;color:#dc2626;font-size:12px;cursor:pointer;font-family:Inter,sans-serif;font-weight:700">⚡ + Nuevo UR</button>
+      <button onclick="exportarExcelCorte()" style="padding:8px 14px;border-radius:6px;background:#f0fdf4;border:1.5px solid #bbf7d0;color:#15803d;font-size:12px;cursor:pointer;font-family:Inter,sans-serif;font-weight:700">📊 Exportar Excel</button>
       <span id="acf-count" style="font-size:12px;color:#6b7280;align-self:center;font-weight:500"></span>
     </div>
     <!-- Tabs por vendedor -->
@@ -690,12 +891,28 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
     <div class="table-wrap">
       <table class="corte-tbl">
         <thead><tr>
-          <th>Cód/Pedido</th><th>Cliente</th><th>Vend.</th><th>Urgente</th><th>Cant</th>
+          <th>Cód/Pedido</th><th>Cliente</th><th>Vend.</th><th>UR</th><th>Cant</th>
           <th>Pantalón / Desc.</th><th>Color P</th><th>Top / Desc.</th><th>Color T</th>
           <th>Bordado</th><th>REM</th><th>Paso / ETA</th><th>Acciones</th>
         </tr></thead>
         <tbody id="admin-corte-tbody"></tbody>
       </table>
+    </div>
+  </div>
+  <div id="at-bo" class="content wide" style="display:none">
+    <div class="lista-tabs" id="admin-bord-tabs"></div>
+    <div class="table-wrap">
+      <table class="corte-tbl">
+        <thead><tr><th>Cód/Pedido</th><th>Cliente</th><th>Vend.</th><th>Cant</th><th>Texto</th><th>Logo</th><th>Hilo Tex.</th><th>Hilo Logo</th><th>Ubic. Tex.</th><th>Ubic. Logo</th><th>Paso</th><th>Acciones</th></tr></thead>
+        <tbody id="admin-bord-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="at-lt" class="content" style="display:none">
+    <div style="max-width:640px;margin:0 auto">
+      <div style="font-size:20px;font-weight:700;color:var(--text);margin-bottom:4px;letter-spacing:-.02em">Lotes de corte</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px">Cada lote agrupa hasta 52 uniformes. Corte solo ve los lotes que ya enviaste (los pedidos urgentes UR siempre son visibles de inmediato).</div>
+      <div id="lotes-body"></div>
     </div>
   </div>
   <div id="at-t" class="content wide" style="display:none">
@@ -730,6 +947,14 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
     <div style="max-width:520px;margin:0 auto">
       <div style="font-size:20px;font-weight:700;color:var(--text);margin-bottom:6px;letter-spacing:-.02em">Ajustes del sistema</div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:28px">Configuración y herramientas de administración</div>
+
+      <!-- Colores rápidos de remate/cordón -->
+      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:14px;box-shadow:var(--shadow)">
+        <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:4px">Colores de remate y cordón</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Estos son los colores rápidos que ven los vendedores al crear un pedido</div>
+        <div id="colores-rapidos-body"></div>
+      </div>
+
 
       <!-- Reset datos -->
       <div style="background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:14px;box-shadow:var(--shadow)">
@@ -843,6 +1068,7 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 // == SUPABASE ==
 const SUPABASE_URL='https://jnmguvnsuqqggvqqgltz.supabase.co';
@@ -963,6 +1189,155 @@ async function cargarPedidosDesdeSupabase(){
 // Promesa que se resuelve cuando la primera carga desde Supabase terminó.
 const pedidosReady=cargarPedidosDesdeSupabase();
 
+let REMATES_QUICK=[],CORDONES_QUICK=[];
+async function cargarColoresRapidos(){
+  try{
+    const {data,error}=await sb.from('colores_rapidos').select('*').order('orden',{ascending:true});
+    if(error){console.error('Error cargando colores rápidos:',error);return;}
+    REMATES_QUICK=(data||[]).filter(x=>x.tipo==='remate').map(x=>({c:x.codigo,h:x.hex||'#94a3b8',n:x.nombre,_id:x.id}));
+    CORDONES_QUICK=(data||[]).filter(x=>x.tipo==='cordon').map(x=>({c:x.codigo,h:x.hex||'#94a3b8',n:x.nombre,_id:x.id}));
+  }catch(err){console.error('Error cargando colores rápidos:',err);}
+}
+cargarColoresRapidos();
+async function agregarColorRapido(tipo){
+  const codigo=(document.getElementById('cr-'+tipo+'-cod')?.value||'').trim().toUpperCase();
+  const nombre=(document.getElementById('cr-'+tipo+'-nom')?.value||'').trim();
+  const hex=(document.getElementById('cr-'+tipo+'-hex')?.value||'#94a3b8').trim();
+  if(!codigo||!nombre){alert('Escribe el código y el nombre del color.');return;}
+  try{
+    const {error}=await sb.from('colores_rapidos').insert({tipo,codigo,nombre,hex,orden:99});
+    if(error){alert('No se pudo agregar: '+error.message);return;}
+    document.getElementById('cr-'+tipo+'-cod').value='';
+    document.getElementById('cr-'+tipo+'-nom').value='';
+    await cargarColoresRapidos();
+    renderColoresRapidos();
+  }catch(err){alert('Error agregando color.');}
+}
+async function borrarColorRapido(id){
+  if(!confirm('¿Borrar este color de la lista rápida?'))return;
+  try{
+    const {error}=await sb.from('colores_rapidos').delete().eq('id',id);
+    if(error){alert('No se pudo borrar: '+error.message);return;}
+    await cargarColoresRapidos();
+    renderColoresRapidos();
+  }catch(err){alert('Error borrando color.');}
+}
+function renderColoresRapidos(){
+  const cont=document.getElementById('colores-rapidos-body');
+  if(!cont) return;
+  const fila=(tipo,lista)=>`
+    <div style="margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;text-transform:capitalize">Colores de ${tipo==='remate'?'remate':'cordón'}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        ${lista.length?lista.map(c=>`<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e7ef;font-size:12px">
+          <span style="width:12px;height:12px;border-radius:50%;background:${c.h};border:1px solid #ccc;display:inline-block"></span>
+          <b>${c.c}</b> — ${c.n}
+          <span style="cursor:pointer;color:#dc2626;font-weight:700;margin-left:4px" onclick="borrarColorRapido('${c._id}')" title="Borrar">✕</span>
+        </div>`).join(''):'<span style="color:var(--muted2);font-size:12px">Sin colores todavía.</span>'}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input id="cr-${tipo}-cod" class="inp" style="margin-bottom:0;width:90px" placeholder="Código">
+        <input id="cr-${tipo}-nom" class="inp" style="margin-bottom:0;width:140px" placeholder="Nombre">
+        <input id="cr-${tipo}-hex" type="color" value="#94a3b8" style="width:44px;height:40px;border-radius:8px;border:1.5px solid var(--border);cursor:pointer">
+        <button onclick="agregarColorRapido('${tipo}')" style="padding:0 16px;border-radius:8px;border:none;background:var(--blue);color:#fff;font-size:12px;font-weight:600;cursor:pointer">+ Agregar</button>
+      </div>
+    </div>`;
+  cont.innerHTML=fila('remate',REMATES_QUICK)+fila('cordon',CORDONES_QUICK);
+}
+
+let lotesCache=[];
+async function cargarLotes(){
+  try{
+    const {data,error}=await sb.from('lotes').select('*').order('orden',{ascending:true});
+    if(error){console.error('Error cargando lotes:',error);return;}
+    lotesCache=data||[];
+  }catch(err){console.error('Error cargando lotes:',err);}
+}
+cargarLotes();
+function contarItemsEnLote(nombre){
+  return getAllPedidos().flatMap(p=>p.items||[]).filter(o=>o.lote===nombre).length;
+}
+function asignarLote(){
+  let actual=lotesCache.filter(l=>l.estado==='borrador').sort((a,b)=>(b.orden||0)-(a.orden||0))[0];
+  if(actual && contarItemsEnLote(actual.nombre)<52){
+    return actual.nombre;
+  }
+  const maxOrden=lotesCache.length?Math.max(...lotesCache.map(l=>l.orden||0)):0;
+  const nuevoOrden=maxOrden+1;
+  const nombre=`${codPrefix||'J'}.${nuevoOrden}`;
+  const nuevoLote={nombre,estado:'borrador',orden:nuevoOrden,id:null};
+  lotesCache.push(nuevoLote);
+  sb.from('lotes').insert({nombre,estado:'borrador',orden:nuevoOrden}).select().then(({data,error})=>{
+    if(!error&&data&&data[0]) nuevoLote.id=data[0].id;
+    else if(error) console.error('Error creando lote:',error);
+  }).catch(err=>console.error('Error creando lote:',err));
+  return nombre;
+}
+function loteEnviado(nombreLote){
+  if(!nombreLote) return true;
+  const l=lotesCache.find(x=>x.nombre===nombreLote);
+  return l ? l.estado==='enviado' : true;
+}
+function itemVisibleCorte(o){
+  if((o.codigo||'').toUpperCase().startsWith('UR')) return true;
+  return loteEnviado(o.lote);
+}
+async function enviarLoteACorte(nombre){
+  if(!confirm(`¿Enviar el lote ${nombre} a Corte? Los ${contarItemsEnLote(nombre)} uniformes de este lote quedarán disponibles para cortar.`))return;
+  const l=lotesCache.find(x=>x.nombre===nombre);
+  if(!l){alert('Lote no encontrado.');return;}
+  l.estado='enviado';
+  try{
+    const {error}=await sb.from('lotes').update({estado:'enviado'}).eq('nombre',nombre);
+    if(error){alert('No se pudo enviar el lote: '+error.message);l.estado='borrador';return;}
+  }catch(err){alert('Error enviando el lote.');l.estado='borrador';return;}
+  if(typeof renderLotes==='function') renderLotes();
+  if(typeof renderCorte==='function') renderCorte();
+  if(typeof renderAdminCorte==='function') renderAdminCorte();
+}
+async function renombrarLote(nombreActual){
+  const nuevo=prompt('Nuevo nombre para este lote:',nombreActual);
+  if(!nuevo||nuevo.trim()===''||nuevo===nombreActual)return;
+  const nuevoNombre=nuevo.trim();
+  const l=lotesCache.find(x=>x.nombre===nombreActual);
+  if(!l){alert('Lote no encontrado.');return;}
+  try{
+    const {error}=await sb.from('lotes').update({nombre:nuevoNombre}).eq('nombre',nombreActual);
+    if(error){alert('No se pudo renombrar: '+error.message);return;}
+  }catch(err){alert('Error renombrando el lote.');return;}
+  getAllPedidos().forEach(ped=>{(ped.items||[]).forEach(o=>{if(o.lote===nombreActual)o.lote=nuevoNombre;});});
+  savePedidos();
+  l.nombre=nuevoNombre;
+  if(typeof renderLotes==='function') renderLotes();
+}
+function renderLotes(){
+  const cont=document.getElementById('lotes-body');
+  if(!cont) return;
+  if(!lotesCache.length){
+    cont.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted2)">Aún no se ha creado ningún lote. Se crea automáticamente cuando un vendedor envía su primer pedido.</div>';
+    return;
+  }
+  const ordenados=[...lotesCache].sort((a,b)=>(b.orden||0)-(a.orden||0));
+  cont.innerHTML=ordenados.map(l=>{
+    const count=contarItemsEnLote(l.nombre);
+    const pct=Math.min(100,Math.round(count/52*100));
+    return `<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <b style="font-size:15px">${l.nombre}</b>
+          <span style="cursor:pointer;color:var(--muted);font-size:13px" onclick="renombrarLote('${l.nombre}')" title="Renombrar">✏</span>
+          <span class="paso-badge ${l.estado==='enviado'?'paso-6':'paso-0'}" style="font-size:10px">${l.estado==='enviado'?'✓ Enviado a Corte':'⏳ Borrador'}</span>
+        </div>
+        <span style="font-size:12px;color:var(--muted)">${count} / 52 uniformes</span>
+      </div>
+      <div style="width:100%;height:8px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-bottom:12px">
+        <div style="width:${pct}%;height:100%;background:${l.estado==='enviado'?'#16a34a':'#2563eb'}"></div>
+      </div>
+      ${l.estado==='borrador'?`<button onclick="enviarLoteACorte('${l.nombre}')" style="padding:8px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;font-size:12px;font-weight:600;cursor:pointer">Enviar a Corte</button>`:''}
+    </div>`;
+  }).join('');
+}
+
 async function borrarPedidosEnSupabase(){
   try{
     const {error:e1}=await sb.from('items').delete().not('id','is',null);
@@ -1058,6 +1433,7 @@ const VENDORS=[
 ];
 const ADMIN_PIN='1234';
 const CB_PIN='1978';
+const DISENO_PIN='2468';
 const TIFFANY='TFK-TG';
 const BP=['WWHAH','WWSY'];
 const BN=['WWXY','WWCH'];
@@ -1382,10 +1758,10 @@ function setRole(r,btn){
   role=r;
   document.querySelectorAll('.rtab').forEach(b=>b.classList.remove('on'));btn.classList.add('on');
   document.getElementById('vwrap').style.display=r==='v'?'block':'none';
-  document.getElementById('apwrap').style.display=(r==='a'||r==='c'||r==='b')?'block':'none';
+  document.getElementById('apwrap').style.display=(r==='a'||r==='c'||r==='b'||r==='d')?'block':'none';
   document.getElementById('vpwrap').style.display='none';
   document.getElementById('vsel').value='';
-  const _al=document.getElementById('apwrap-lbl');if(_al)_al.textContent=r==='a'?'PIN Admin':'Contraseña';
+  const _al=document.getElementById('apwrap-lbl');if(_al)_al.textContent=r==='a'?'PIN Admin':(r==='d'?'PIN Diseñador':'Contraseña');
 }
 function onVC(){
   const v=document.getElementById('vsel').value;
@@ -1405,24 +1781,35 @@ async function doLogin(){
     err.style.display='none';err.style.color='';
     cVend=v;const _vl=document.getElementById('vlabel');if(_vl)_vl.textContent=v;
     showScreen('s-vendedor');updateNotifBadge();renderCarrito();
+    mostrarBotonChatInterno(false);
   }else if(role==='c'){
     if(document.getElementById('apin').value!==CB_PIN){err.textContent='Contraseña incorrecta.';err.style.display='block';return;}
     err.textContent='Cargando datos…';err.style.color='var(--muted)';err.style.display='block';
     await cargarPedidosDesdeSupabase();
     err.style.display='none';err.style.color='';
     showScreen('s-corte');renderCorte();
+    mostrarBotonChatInterno(true);
   }else if(role==='b'){
     if(document.getElementById('apin').value!==CB_PIN){err.textContent='Contraseña incorrecta.';err.style.display='block';return;}
     err.textContent='Cargando datos…';err.style.color='var(--muted)';err.style.display='block';
     await cargarPedidosDesdeSupabase();
     err.style.display='none';err.style.color='';
     showScreen('s-bordado');renderBordado();
+    mostrarBotonChatInterno(true);
+  }else if(role==='d'){
+    if(document.getElementById('apin').value!==DISENO_PIN){err.textContent='PIN incorrecto.';err.style.display='block';return;}
+    err.textContent='Cargando datos…';err.style.color='var(--muted)';err.style.display='block';
+    await cargarPedidosDesdeSupabase();
+    err.style.display='none';err.style.color='';
+    showScreen('s-diseno');renderDiseno();
+    mostrarBotonChatInterno(true);
   }else{
     if(document.getElementById('apin').value!==ADMIN_PIN){err.textContent='PIN incorrecto.';err.style.display='block';return;}
     err.textContent='Cargando datos…';err.style.color='var(--muted)';err.style.display='block';
     await cargarPedidosDesdeSupabase();
     err.style.display='none';err.style.color='';
     showScreen('s-admin');renderAdmin();renderBV();renderDashboard();
+    mostrarBotonChatInterno(true);
   }
 }
 function logout(){
@@ -1432,10 +1819,57 @@ function logout(){
   document.getElementById('vsel').value='';
   document.getElementById('vpwrap').style.display='none';
   document.getElementById('apwrap').style.display='none';
+  mostrarBotonChatInterno(false);
+  const panel=document.getElementById('chat-interno-panel');if(panel)panel.style.display='none';
 }
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('show'));document.getElementById(id).classList.add('show');}
 
 // == AVANZAR PASO (por uniforme individual, con chequeo grupal) ==
+// Corte por partes: primero Camisa, luego Pantalón (o al revés), y hasta que
+// ambas piezas necesarias estén cortadas se marca el paso "Cortado" completo.
+function corteBotonesAccion(o,vendor,pedNum,itemIdx){
+  const paso=getPaso(o);
+  const pbtnCls=['','pbtn-corte','pbtn-bordado','pbtn-costura','pbtn-calidad','pbtn-empaque','pbtn-empaque'];
+  if(paso===0){
+    const necCamisa=(!o.soloMitad||o.soloMitad==='top');
+    const necPant=(!o.soloMitad||o.soloMitad==='pant');
+    let html='';
+    if(necCamisa){
+      html+=o.cortCamisa
+        ?`<button class="pbtn" style="background:#e5e7eb;color:#6b7280;cursor:default" disabled>✓ Camisa</button>`
+        :`<button class="pbtn pbtn-corte" onclick="marcarCorteParcial('${vendor}',${pedNum},${itemIdx},'camisa')">✂ Camisa</button>`;
+    }
+    if(necPant){
+      html+=o.cortPant
+        ?`<button class="pbtn" style="background:#e5e7eb;color:#6b7280;cursor:default" disabled>✓ Pantalón</button>`
+        :`<button class="pbtn pbtn-corte" onclick="marcarCorteParcial('${vendor}',${pedNum},${itemIdx},'pant')">✂ Pantalón</button>`;
+    }
+    return html;
+  }
+  const nextPasoNum=siguientePasoReal(o);
+  const nextP=nextPasoNum!==null?PASOS[nextPasoNum]:null;
+  return nextP?`<button class="pbtn ${pbtnCls[nextPasoNum]||'pbtn-empaque'}" onclick="avanzarPaso('${vendor}',${pedNum},${itemIdx})">→${nextP.icon} ${nextP.label}</button>`:'';
+}
+function marcarCorteParcial(vendor,pedNum,itemIdx,parte){
+  const peds=pedidosVend[vendor]||[];
+  const ped=peds.find(p=>p.num===pedNum);
+  if(!ped) return;
+  const o=ped.items[itemIdx];if(!o)return;
+  if(parte==='camisa') o.cortCamisa=true; else if(parte==='pant') o.cortPant=true;
+  const necCamisa=(!o.soloMitad||o.soloMitad==='top');
+  const necPant=(!o.soloMitad||o.soloMitad==='pant');
+  const listoCamisa=!necCamisa||o.cortCamisa;
+  const listoPant=!necPant||o.cortPant;
+  if(listoCamisa&&listoPant){
+    o.paso=1;
+    ped.fechaUltimoAvance=new Date().toLocaleString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    checkNotifPedido(vendor,pedNum,o.paso);
+  }
+  savePedidos();
+  renderCorte();
+  if(typeof renderAdmin==='function') renderAdmin();
+  if(typeof renderAdminCorte==='function') renderAdminCorte();
+}
 function avanzarPaso(vendor,pedidoNum,itemIdx){
   const peds=pedidosVend[vendor]||[];
   const ped=peds.find(p=>p.num===pedidoNum);
@@ -1496,6 +1930,7 @@ function doEnviar(){
       obj.msgs=[];
       obj.codigo=_nextCode;
       _nextCode=_incCode(_nextCode);
+      obj.lote=asignarLote();
       try{const p=calcP(obj);obj.precio=p.unit;obj.precioTotal=p.total;}catch(e){obj.precio=0;obj.precioTotal=0;}
       return obj;
     });
@@ -1842,16 +2277,17 @@ function renderCorte(){
   if(vsel){vsel.innerHTML=`<option value="">Vendedor: Todos</option>`+vendors.map(v=>`<option value="${v}" ${cfVend===v?'selected':''}>${v}</option>`).join('');}
 
   const vendPeds=allPeds.filter(p=>p.vendor===cortePedActivo);
-  // Aplanar items con referencia al pedido
-  let allItems=vendPeds.flatMap(ped=>ped.items.map((o,ii)=>({...o,_pedNum:ped.num,_pedFecha:ped.fecha,_ii:ii})));
+  // Aplanar items con referencia al pedido — solo los que ya están habilitados para Corte
+  let allItems=vendPeds.flatMap(ped=>ped.items.map((o,ii)=>({...o,_pedNum:ped.num,_pedFecha:ped.fecha,_ii:ii}))).filter(itemVisibleCorte);
   if(cfPaso!=='') allItems=allItems.filter(o=>String(getPaso(o))===cfPaso);
   if(cfVend!=='') allItems=allItems.filter(o=>o._pedNum&&pedidosVend[cortePedActivo]?.find(p=>p.num===o._pedNum));
   if(cfTexto) allItems=allItems.filter(o=>(o.cliente||'').toLowerCase().includes(cfTexto)||(o.codigo||'').toLowerCase().includes(cfTexto)||(o.ubicacion||'').toLowerCase().includes(cfTexto)||String(o._pedNum).includes(cfTexto));
   const cfCount=document.getElementById('cf-count');
-  if(cfCount) cfCount.textContent=allItems.length!==vendPeds.flatMap(p=>p.items).length?`Mostrando ${allItems.length}`:'';
+  if(cfCount) cfCount.textContent=allItems.length!==vendPeds.flatMap(p=>p.items).filter(itemVisibleCorte).length?`Mostrando ${allItems.length}`:'';
 
-  const totalItems=vendPeds.flatMap(p=>p.items).length;
-  const pasoCounts=PASOS.map(p=>vendPeds.flatMap(x=>x.items).filter(i=>getPaso(i)===p.id).length);
+  const itemsVendVisibles=vendPeds.flatMap(p=>p.items).filter(itemVisibleCorte);
+  const totalItems=itemsVendVisibles.length;
+  const pasoCounts=PASOS.map(p=>itemsVendVisibles.filter(i=>getPaso(i)===p.id).length);
   document.getElementById('lista-stats').innerHTML=`
     <div class="lista-stat">📋 <b>${vendPeds.length}</b> pedidos</div>
     <div class="lista-stat"><b>${totalItems}</b> uniformes</div>
@@ -1867,13 +2303,13 @@ function renderCorte(){
       const prevPasoNum=anteriorPasoReal(o);
       const ped=pedidosVend[cortePedActivo]?.find(p=>p.num===o._pedNum);
       const terminado=paso>=6||!!ped?.guia;
-      const esUrgente=ped?.urgente||false;
+      const esUrgente=(o.codigo||'').toUpperCase().startsWith('UR');
       const tieneMsg=(o.msgs||[]).length>0;
       const pbtnCls=['','pbtn-corte','pbtn-bordado','pbtn-costura','pbtn-calidad','pbtn-empaque','pbtn-empaque'];
       return `<div class="prod-card ${terminado?'terminado':''} ${esUrgente?'urgente-row':''}">
         <div class="prod-card-top">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="cod-badge" style="cursor:pointer" onclick="editarCodigoItem('${cortePedActivo}',${o._pedNum},${o._ii})" title="Editar código">${o.codigo||'—'} ✏</span>
+            <span class="cod-badge" style="cursor:pointer${esUrgente?';background:#fee2e2;color:#dc2626;border-color:#fecaca':''}" onclick="editarCodigoItem('${cortePedActivo}',${o._pedNum},${o._ii})" title="Editar código">${o.codigo||'—'} ✏</span>
             <span style="font-family:monospace;font-size:11px;color:#fcd34d">#${o._pedNum}</span>
             ${esUrgente?'<span class="urg-badge">⚡ URGENTE</span>':''}
           </div>
@@ -1886,10 +2322,10 @@ function renderCorte(){
           ${(!o.soloMitad||o.soloMitad==='top')?`<br>T: <b>${o.ttop||'—'} ${o.stop||''}</b>${o.dtop?` <span style="color:var(--muted);font-size:10px">— ${o.dtop}</span>`:''}` :''}
         </div>
         <div class="prod-card-actions">
-          <button onclick="toggleUrgente('${cortePedActivo}',${o._pedNum})" style="padding:5px 10px;border-radius:7px;border:1px solid ${esUrgente?'#fecaca':'#e2e7ef'};background:${esUrgente?'#fee2e2':'#f4f6f9'};color:${esUrgente?'#dc2626':'#9ca3af'};font-size:11px;cursor:pointer">⚡</button>
-          ${!terminado&&nextP?`<button class="pbtn ${pbtnCls[nextPasoNum]||'pbtn-empaque'}" onclick="avanzarPaso('${cortePedActivo}',${o._pedNum},${o._ii})">→${nextP.icon} ${nextP.label}</button>`:''}
+          ${!terminado?corteBotonesAccion(o,cortePedActivo,o._pedNum,o._ii):''}
           ${prevPasoNum!==null&&!terminado?`<button class="pbtn pbtn-undo" onclick="retrocederPaso('${cortePedActivo}',${o._pedNum},${o._ii})">↩ Atrás</button>`:''}
           <button class="pbtn pbtn-msg ${tieneMsg?'activo':''}" onclick="openMsgModal('${cortePedActivo}',${o._pedNum},${o._ii},'corte')">💬</button>
+          ${!o.patronPendiente?`<button class="pbtn" style="background:#ede9fe;border-color:#ddd6fe;color:#7c3aed" onclick="solicitarPatron('${cortePedActivo}',${o._pedNum},${o._ii})">📐 Patrón</button>`:`<button class="pbtn" style="background:#f3f4f6;border-color:#e5e7eb;color:#9ca3af" disabled>⏳ Patrón pedido</button>`}
         </div>
       </div>`;
     }).join('');
@@ -1903,7 +2339,7 @@ function renderCorte(){
     const prevPasoNum=anteriorPasoReal(o);
     const ped=pedidosVend[cortePedActivo]?.find(p=>p.num===o._pedNum);
     const terminado=paso>=6||!!ped?.guia;
-    const esUrgente=ped?.urgente||false;
+    const esUrgente=(o.codigo||'').toUpperCase().startsWith('UR');
     const etaPed=ped?calcETA(ped):{label:'—',dias:0,fecha:null};
     const tieneMsg=(o.msgs||[]).length>0;
     const tc=o.textoCount||1,lc=o.logoCount||1;
@@ -1912,10 +2348,10 @@ function renderCorte(){
     const bord=[logos,textos].filter(Boolean).join(' / ');
     const pbtnCls=['','pbtn-corte','pbtn-bordado','pbtn-costura','pbtn-calidad','pbtn-empaque','pbtn-empaque'];
     return `<tr class="${terminado?'terminado':''}${esUrgente?' urgente-row':''}${paso===1?' en-corte':''}">
-      <td><span class="cod-badge" style="cursor:pointer" onclick="editarCodigoItem('${cortePedActivo}',${o._pedNum},${o._ii})" title="Editar código">${o.codigo||'—'} ✏</span><br><span style="font-family:monospace;font-size:10px;color:#fcd34d">#${o._pedNum}</span></td>
+      <td><span class="cod-badge" style="cursor:pointer${(o.codigo||'').toUpperCase().startsWith('UR')?';background:#fee2e2;color:#dc2626;border-color:#fecaca':''}" onclick="editarCodigoItem('${cortePedActivo}',${o._pedNum},${o._ii})" title="Editar código">${o.codigo||'—'} ✏</span><br><span style="font-family:monospace;font-size:10px;color:#fcd34d">#${o._pedNum}</span></td>
       <td><b style="font-size:12px">${o.cliente||'—'}</b><br><span style="font-size:9px;color:var(--muted2)">${o.ubicacion||''}</span></td>
       <td><span class="${vtCls(o.vendor)}">${o.vendor||'—'}</span></td>
-      <td style="text-align:center"><button onclick="toggleUrgente('${cortePedActivo}',${o._pedNum})" style="background:${esUrgente?'#fee2e2':'#f4f6f9'};border:1px solid ${esUrgente?'#fecaca':'#e2e7ef'};border-radius:6px;padding:4px 9px;color:${esUrgente?'#dc2626':'#9ca3af'};font-size:11px;cursor:pointer;font-weight:600" title="${esUrgente?'Quitar urgente':'Marcar urgente'}">⚡</button></td>
+      <td style="text-align:center">${(o.codigo||'').toUpperCase().startsWith('UR')?'<span class="urg-badge">⚡ UR</span>':'—'}</td>
       <td style="text-align:center">${o.cantidad||1}${o.soloMitad?' ('+o.soloMitad+')':''}</td>
       <td style="font-size:10px">${(!o.soloMitad||o.soloMitad==='pant')?`<div style="font-weight:600">${o.tpant||'—'} ${o.spant||''}</div>${o.dpant?`<div style="font-size:9px;color:var(--muted);margin-top:2px">${o.dpant}</div>`:''}` :'—'}</td>
       <td>${(!o.soloMitad||o.soloMitad==='pant')?csw(o.cpant):'—'}</td>
@@ -1930,9 +2366,10 @@ function renderCorte(){
       </td>
       <td style="white-space:nowrap">
         <div class="pbtn-group">
-          ${!terminado&&nextP?`<button class="pbtn ${pbtnCls[nextPasoNum]||'pbtn-empaque'}" onclick="avanzarPaso('${cortePedActivo}',${o._pedNum},${o._ii})">→${nextP.icon} ${nextP.label}</button>`:''}
+          ${!terminado?corteBotonesAccion(o,cortePedActivo,o._pedNum,o._ii):''}
           ${prevPasoNum!==null&&!terminado?`<button class="pbtn pbtn-undo" onclick="retrocederPaso('${cortePedActivo}',${o._pedNum},${o._ii})">↩</button>`:''}
           <button class="pbtn pbtn-msg ${tieneMsg?'activo':''}" onclick="openMsgModal('${cortePedActivo}',${o._pedNum},${o._ii},'corte')">💬</button>
+          ${!o.patronPendiente?`<button class="pbtn" style="background:#ede9fe;border-color:#ddd6fe;color:#7c3aed" onclick="solicitarPatron('${cortePedActivo}',${o._pedNum},${o._ii})">📐 Patrón</button>`:`<button class="pbtn" style="background:#f3f4f6;border-color:#e5e7eb;color:#9ca3af" disabled>⏳ Patrón pedido</button>`}
         </div>
       </td>
     </tr>`;
@@ -1977,6 +2414,14 @@ function editarDetallesItem(vendor, pedNum, itemIdx){
         <input id="ed-ctop" class="inp" placeholder="Ej: BKAH, BGFS...">
         <div class="lbl">Descripción extra top</div>
         <textarea id="ed-dtop" class="inp" style="min-height:60px" placeholder="Ej: manga larga, bolsillo bordado..."></textarea>
+      </div>
+
+      <div style="margin-top:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)">Remate / Cordón</div>
+        <div class="lbl">Color remate</div>
+        <input id="ed-crem" class="inp" placeholder="Ej: GMP...">
+        <div class="lbl">Color cordón</div>
+        <input id="ed-ccord" class="inp" placeholder="Ej: LMP...">
       </div>
 
       <input type="hidden" id="ed-vendor">
@@ -2035,6 +2480,8 @@ function editarDetallesItem(vendor, pedNum, itemIdx){
     document.getElementById('ed-ctop').value = o.ctop||'';
     document.getElementById('ed-dtop').value = o.dtop||'';
   }
+  document.getElementById('ed-crem').value = o.crem||'';
+  document.getElementById('ed-ccord').value = o.ccord||'';
 
   m.style.display = 'flex';
 }
@@ -2068,6 +2515,9 @@ function guardarEditDetalle(){
     o.ctop = document.getElementById('ed-ctop').value.trim().toUpperCase();
     o.dtop = document.getElementById('ed-dtop').value.trim().toUpperCase();
   }
+
+  o.crem = document.getElementById('ed-crem').value.trim().toUpperCase();
+  o.ccord = document.getElementById('ed-ccord').value.trim().toUpperCase();
 
   // Aplicar cambio de paso si se seleccionó uno
   const nuevoPaso = document.getElementById('ed-paso').value;
@@ -2211,7 +2661,7 @@ function renderDashboard(){
             <td style="padding:10px 8px;color:var(--text2)">${its.length} items</td>
             <td style="padding:10px 8px"><span class="paso-badge ${pi.cls}" style="font-size:10px">${pi.label}</span>${p.urgente?'<span class="urg-badge" style="margin-left:4px;font-size:9px">⚡</span>':''}</td>
             <td style="padding:10px 8px;font-weight:700;color:var(--green)">L ${total.toLocaleString()}</td>
-            <td style="padding:10px 8px;text-align:right"><button onclick="imprimirPedido('${p.vendor}',${p.num})" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);font-size:11px;cursor:pointer;font-family:Inter,sans-serif;font-weight:600;display:inline-flex;align-items:center;gap:4px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>PDF</button></td>
+            <td style="padding:10px 8px;text-align:right"><button onclick="imprimirPedido('${p.vendor}',${p.num})" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);font-size:11px;cursor:pointer;font-family:Inter,sans-serif;font-weight:600;display:inline-flex;align-items:center;gap:4px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>PDF</button> <button onclick="imprimirEtiquetas('${p.vendor}',${p.num})" style="padding:5px 12px;border-radius:6px;border:1px solid #fef08a;background:#fefce8;color:#a16207;font-size:11px;cursor:pointer;font-family:Inter,sans-serif;font-weight:600">🏷 Etiquetas</button></td>
           </tr>`;
         }).join('')}
         </tbody>
@@ -3018,6 +3468,72 @@ function editarLogo(id){
 
 
 // == PDF / IMPRIMIR PEDIDO ==
+function imprimirEtiquetas(vendor,pedNum){
+  const peds=pedidosVend[vendor]||[];
+  const ped=peds.find(p=>String(p.num)===String(pedNum));
+  if(!ped){alert('Pedido no encontrado.');return;}
+  const items=ped.items||[];
+  if(!items.length){alert('Este pedido no tiene items.');return;}
+  const lote=prompt('Lote de corte (ej: J.2) — se imprime en cada etiqueta:','')||'';
+  const anio=String(new Date().getFullYear()).slice(-2);
+
+  const etiquetas=[];
+  items.forEach(o=>{
+    const tc=o.textoCount||1,lc=o.logoCount||1;
+    const textos=o.llevaTex==='Si'?[...Array(tc)].map((_,i)=>o['t'+(i+1)+'v']).filter(Boolean).join(', '):'';
+    const logos=o.llevaLog==='Si'?[...Array(lc)].map((_,i)=>o['l'+(i+1)+'n']).filter(Boolean).join(', '):'';
+    const mostrarTop=!o.soloMitad||o.soloMitad==='top';
+    const mostrarPant=!o.soloMitad||o.soloMitad==='pant';
+    if(mostrarTop){
+      etiquetas.push(`<div class="etiqueta">
+        <div class="et-head"><span class="et-lote">${lote}-${anio}</span> <span class="et-cod">${o.codigo||'—'}</span> <span class="et-vend">${o.vendor||vendor}</span></div>
+        <div class="et-cliente">${o.cliente||'—'}</div>
+        <div>TALLA: ${o.sexo||''} ${o.ttop||'—'}</div>
+        <div>STYLE: ${o.stop||'—'}</div>
+        <div>COLOR: ${o.ctop||'—'}</div>
+        <div>REM: ${o.crem||'—'}</div>
+        <div>LOGO: ${logos||''}</div>
+        <div>TEXTO: ${textos||''}</div>
+        <div>DESCRIP: ${o.dtop||''}</div>
+      </div>`);
+    }
+    if(mostrarPant){
+      etiquetas.push(`<div class="etiqueta">
+        <div class="et-head"><span class="et-lote">${anio}-${lote}</span> <span class="et-cod">${o.codigo||'—'}</span> <span class="et-vend">${o.vendor||vendor}</span></div>
+        <div class="et-cliente">${o.cliente||'—'}</div>
+        <div>PANT:${o.sexo||''} ${o.tpant||'—'}</div>
+        <div>STYLE: ${o.spant||'—'}</div>
+        <div>COLOR: ${o.cpant||'—'}</div>
+        <div>REM: ${o.crem||'—'}</div>
+        <div>CORD:${o.ccord||''}</div>
+        <div>DESCRIP:${o.dpant||''}</div>
+      </div>`);
+    }
+  });
+
+  const html=`<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><title>Etiquetas — Pedido #${ped.num}</title>
+<style>
+  @page{size:letter;margin:10mm}
+  *{box-sizing:border-box}
+  body{font-family:Calibri,Arial,sans-serif;font-size:10.5pt;color:#111;margin:0}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr)}
+  .etiqueta{border:1px solid #000;padding:8px 10px;min-height:150px;font-size:9.5pt;line-height:1.35}
+  .et-head{font-weight:700;margin-bottom:4px}
+  .et-lote{color:#1d4ed8}
+  .et-cod{color:#dc2626}
+  .et-vend{color:#111}
+  .et-cliente{font-weight:700;text-transform:uppercase;margin-bottom:3px}
+  @media print{.etiqueta{break-inside:avoid}}
+</style></head>
+<body>
+<div class="grid">${etiquetas.join('')}</div>
+<script>window.onload=()=>window.print();</script>
+</body></html>`;
+  const w=window.open('','_blank');
+  if(!w){alert('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes para este sitio.');return;}
+  w.document.write(html);w.document.close();
+}
 function imprimirPedido(vendor, pedNum){
   const peds=pedidosVend[vendor]||[];
   const ped=peds.find(p=>String(p.num)===String(pedNum));
@@ -3173,14 +3689,54 @@ function renderBordado(){
   }).join('');
 }
 function setBordTab(v){bordPedActivo=v;renderBordado();}
+let adminBordActivo=null;
+function renderAdminBordado(){
+  const allPeds=getAllPedidos();
+  const conBord=allPeds.filter(p=>(p.items||[]).some(i=>i.llevaTex==='Si'||i.llevaLog==='Si'||i.llevaBordGorro==='Si'));
+  const tabs=document.getElementById('admin-bord-tabs');
+  const tbody=document.getElementById('admin-bord-tbody');
+  if(!tabs||!tbody) return;
+  if(!conBord.length){tabs.innerHTML='<span style="color:var(--muted2);font-size:12px;padding:4px">Sin bordados.</span>';tbody.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--muted2)">Sin bordados.</td></tr>';return;}
+  const vendors=[...new Set(conBord.map(p=>p.vendor))];
+  if(!adminBordActivo) adminBordActivo=vendors[vendors.length-1];
+  tabs.innerHTML=vendors.map(v=>`<button class="ltab ${adminBordActivo===v?'on':''}" onclick="adminBordActivo='${v}';renderAdminBordado()">${v}</button>`).join('');
+  const vendPeds=conBord.filter(p=>p.vendor===adminBordActivo);
+  const items=vendPeds.flatMap(ped=>ped.items.filter(i=>i.llevaTex==='Si'||i.llevaLog==='Si'||i.llevaBordGorro==='Si').map((o,ii)=>({...o,_pedNum:ped.num,_ii:ped.items.indexOf(o)})));
+  tbody.innerHTML=items.map(o=>{
+    const tc=o.textoCount||1,lc=o.logoCount||1;
+    const textos=[...Array(tc)].map((_,i)=>o['t'+(i+1)+'v']).filter(Boolean).join(', ');
+    const logos=[...Array(lc)].map((_,i)=>o['l'+(i+1)+'n']).filter(Boolean).join(', ');
+    const hiloTex=[...Array(tc)].map((_,i)=>o['t'+(i+1)+'c']).filter(Boolean).join(', ');
+    const hiloLog=[...Array(lc)].map((_,i)=>o['l'+(i+1)+'c']).filter(Boolean).join(', ');
+    const ubicTex=[...Array(tc)].map((_,i)=>o['t'+(i+1)+'u']).filter(Boolean).join(', ');
+    const ubicLog=[...Array(lc)].map((_,i)=>o['l'+(i+1)+'u']).filter(Boolean).join(', ');
+    const pi=getPasoInfo(getPaso(o));const tieneMsg=(o.msgs||[]).length>0;
+    return `<tr class="${o.bordado?'terminado':''}">
+      <td><span class="cod-badge" style="cursor:pointer" onclick="editarCodigoItem('${adminBordActivo}',${o._pedNum},${o._ii})" title="Editar código">${o.codigo||'—'} ✏</span><br><span style="font-family:monospace;font-size:10px;color:#fcd34d">#${o._pedNum}</span></td>
+      <td><b>${o.cliente||'—'}</b></td>
+      <td><span class="${vtCls(o.vendor)}">${o.vendor||'—'}</span></td>
+      <td>${o.cantidad||1}</td>
+      <td>${textos||'—'}</td><td>${logos||'—'}</td>
+      <td>${hiloTex||'—'}</td><td>${hiloLog||'—'}</td>
+      <td>${ubicTex||'—'}</td><td>${ubicLog||'—'}</td>
+      <td><span class="paso-badge ${pi.cls}" style="font-size:9px">${pi.icon} ${pi.label}</span></td>
+      <td style="white-space:nowrap">
+        ${!o.bordado?`<button class="pbtn pbtn-bordado" onclick="toggleBordado('${adminBordActivo}',${o._pedNum},${o._ii})">✓ Listo</button>`:`<button class="pbtn pbtn-undo" onclick="toggleBordado('${adminBordActivo}',${o._pedNum},${o._ii})">↩</button>`}
+        <button class="pbtn pbtn-msg ${tieneMsg?'activo':''}" onclick="openMsgModal('${adminBordActivo}',${o._pedNum},${o._ii},'bordado')">💬</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
 function toggleBordado(vendor,pedidoNum,itemIdx){
   const peds=pedidosVend[vendor]||[];const ped=peds.find(p=>p.num===pedidoNum);if(!ped)return;
-  ped.items[itemIdx].bordado=!ped.items[itemIdx].bordado;savePedidos();renderBordado();
+  ped.items[itemIdx].bordado=!ped.items[itemIdx].bordado;savePedidos();
+  renderBordado();
+  if(typeof renderAdminBordado==='function') renderAdminBordado();
 }
 
 // == ADMIN ==
 function aTab(t,btn){
-  ['d','t','p','v','g','c','i','x','e','cl','f'].forEach(id=>{
+  ['d','t','p','bo','lt','v','g','c','i','x','e','cl','f'].forEach(id=>{
     const el=document.getElementById('at-'+id);
     if(el)el.style.display=t===id?'':'none';
   });
@@ -3193,10 +3749,13 @@ function aTab(t,btn){
   if(t==='d')renderDashboard();
   if(t==='e')renderInventarioEstilos();
   if(t==='p')renderAdminCorte();
+  if(t==='bo')renderAdminBordado();
+  if(t==='lt')renderLotes();
   if(t==='cl')renderClientes();
   if(t==='f')renderFacturacion();
 }
 function renderAjustes(){
+  renderColoresRapidos();
   const allPeds=getAllPedidos();
   const totalPeds=allPeds.length;
   const vends=Object.keys(localStorage).filter(k=>k.startsWith('vend_')).length;
@@ -3300,7 +3859,7 @@ function renderAdminCorte(){
     const pi     = getPasoInfo(paso);
     const ped    = allPeds.find(p=>p.num===o._pedNum);
     const terminado = paso>=6||!!ped?.guia;
-    const esUrgente = ped?.urgente||false;
+    const esUrgente = (o.codigo||'').toUpperCase().startsWith('UR');
     const etaPed = ped ? calcETA(ped) : {label:'—',dias:0,fecha:null};
     const tieneMsg = (o.msgs||[]).length>0;
     const tc=o.textoCount||1, lc=o.logoCount||1;
@@ -3310,8 +3869,9 @@ function renderAdminCorte(){
 
     return `<tr class="${terminado?'terminado':''}${esUrgente?' urgente-row':''}">
       <td>
-        <span class="cod-badge" style="cursor:pointer" onclick="editarCodigoItem('${vendorToShow}',${o._pedNum},${o._ii})" title="Editar código">${o.codigo||'—'} ✏</span>
+        <span class="cod-badge" style="cursor:pointer${(o.codigo||'').toUpperCase().startsWith('UR')?';background:#fee2e2;color:#dc2626;border-color:#fecaca':''}" onclick="editarCodigoItem('${vendorToShow}',${o._pedNum},${o._ii})" title="Editar código">${o.codigo||'—'} ✏</span>
         <br><span style="font-family:monospace;font-size:10px;color:var(--blue)">#${o._pedNum}</span>
+        ${o.lote?`<br><span style="font-size:9px;color:${loteEnviado(o.lote)?'#16a34a':'#d97706'}">${o.lote} ${loteEnviado(o.lote)?'✓':'⏳'}</span>`:''}
       </td>
       <td><b style="font-size:12px">${o.cliente||'—'}</b><br><span style="font-size:9px;color:var(--muted2)">${o.ubicacion||''}</span></td>
       <td><span class="${vtCls(o.vendor)}">${o.vendor||'—'}</span></td>
@@ -3334,15 +3894,13 @@ function renderAdminCorte(){
         <div class="pbtn-group">
           <!-- Admin puede avanzar paso, editar descripción y mensajes -->
           ${(()=>{
-            const nextPasoNum=siguientePasoReal(o);
-            const nextP=nextPasoNum!==null?PASOS[nextPasoNum]:null;
             const prevPasoNum=anteriorPasoReal(o);
-            const pbtnCls=['','pbtn-corte','pbtn-bordado','pbtn-costura','pbtn-calidad','pbtn-empaque','pbtn-empaque'];
             return (
-              (!terminado&&nextP?`<button class="pbtn ${pbtnCls[nextPasoNum]||'pbtn-empaque'}" onclick="avanzarPaso('${vendorToShow}',${o._pedNum},${o._ii});renderAdminCorte()">→${nextP.icon} ${nextP.label}</button>`:'') +
+              (!terminado?corteBotonesAccion(o,vendorToShow,o._pedNum,o._ii):'') +
               (prevPasoNum!==null&&!terminado?`<button class="pbtn pbtn-undo" onclick="retrocederPaso('${vendorToShow}',${o._pedNum},${o._ii});renderAdminCorte()">↩</button>`:'') +
               `<button class="pbtn" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d" onclick="editarDetallesItem('${vendorToShow}',${o._pedNum},${o._ii})">✏ Desc.</button>` +
               `<button class="pbtn" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" onclick="imprimirPedido('${vendorToShow}',${o._pedNum})" title="Imprimir PDF"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><path d="M6 14h12v8H6z"/></svg></button>` +
+              `<button class="pbtn" style="background:#fefce8;border-color:#fef08a;color:#a16207" onclick="imprimirEtiquetas('${vendorToShow}',${o._pedNum})" title="Imprimir etiquetas">🏷</button>` +
               `<button class="pbtn pbtn-msg ${tieneMsg?'activo':''}" onclick="openMsgModal('${vendorToShow}',${o._pedNum},${o._ii},'admin')">💬</button>`
             );
           })()}
@@ -4913,9 +5471,9 @@ function sectionUniforme(iF){
 
   // ── REMATES ──
   const cremTipo = FD.cremTipo || '';
-  const remOpts = [{c:'LMP',h:'#7cb342',n:'Lima'},{c:'PRMP',h:'#ad1457',n:'Rosa osc.'},{c:'GMP',h:'#388e3c',n:'Verde'}];
+  const remOpts = (typeof REMATES_QUICK!=='undefined'&&REMATES_QUICK.length)?REMATES_QUICK:[{c:'LMP',h:'#7cb342',n:'Lima'},{c:'PRMP',h:'#ad1457',n:'Rosa osc.'},{c:'GMP',h:'#388e3c',n:'Verde'}];
   html += `<div class="form-section">
-    <div class="form-section-title"> Remates / Cordones</div>
+    <div class="form-section-title"> Color de remates</div>
     <div class="chip-group">
       ${remOpts.map(r=>`<div class="chip ${cremTipo===r.c?'sel-green':''}" onclick="FD.cremTipo='${r.c}';FD.crem='${r.c}';reSec()">
         <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${r.h};vertical-align:middle;margin-right:4px;border:1px solid rgba(255,255,255,.3)"></span>${r.c} — ${r.n}
@@ -4923,6 +5481,20 @@ function sectionUniforme(iF){
       <div class="chip ${cremTipo==='OTRO'?'sel':''}" onclick="FD.cremTipo='OTRO';FD.crem='';reSec()">🎨 Otro color</div>
     </div>
     ${cremTipo==='OTRO'?colorSectionHTML('crem',C_AH,FD.crem||'','Color remates'):''}
+  </div>`;
+
+  // ── CORDONES ──
+  const ccordTipo = FD.ccordTipo || '';
+  const cordOpts = (typeof CORDONES_QUICK!=='undefined'&&CORDONES_QUICK.length)?CORDONES_QUICK:[{c:'LMP',h:'#7cb342',n:'Lima'},{c:'PRMP',h:'#ad1457',n:'Rosa osc.'},{c:'GMP',h:'#388e3c',n:'Verde'}];
+  html += `<div class="form-section">
+    <div class="form-section-title"> Color de cordones</div>
+    <div class="chip-group">
+      ${cordOpts.map(r=>`<div class="chip ${ccordTipo===r.c?'sel-green':''}" onclick="FD.ccordTipo='${r.c}';FD.ccord='${r.c}';reSec()">
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${r.h};vertical-align:middle;margin-right:4px;border:1px solid rgba(255,255,255,.3)"></span>${r.c} — ${r.n}
+      </div>`).join('')}
+      <div class="chip ${ccordTipo==='OTRO'?'sel':''}" onclick="FD.ccordTipo='OTRO';FD.ccord='';reSec()">🎨 Otro color</div>
+    </div>
+    ${ccordTipo==='OTRO'?colorSectionHTML('ccord',C_AH,FD.ccord||'','Color cordones'):''}
   </div>`;
 
   // ── BORDADO ──
@@ -5245,6 +5817,7 @@ function aplicarClienteForm(c){
     tpant:src.tpant||'', spant:src.spant||'', cpant:src.cpant||'', cpantFab:src.cpantFab||'AH',
     ttop:src.ttop||'', stop:src.stop||'', ctop:src.ctop||'', ctopFab:src.ctopFab||'AH',
     crem:src.crem||'', cremTipo:src.crem||'',
+    ccord:src.ccord||'', ccordTipo:src.ccord||'',
     combinacion:src.combinacion||'No', combColor:src.combColor||'', combUbic:src.combUbic||'',
     // Bordado habitual
     llevaTex:src.llevaTex||'No',
@@ -5276,6 +5849,7 @@ function agregarAlCarritoForm(){
     stop:FD.stop||'', otroTop:FD.otroTop||'', dtop:FD.dtop||'',
     combinacion:FD.combinacion||'No', combColor:FD.combColor||'', combUbic:FD.combUbic||'',
     crem:FD.crem||'', cremTipo:FD.cremTipo||'',
+    ccord:FD.ccord||'', ccordTipo:FD.ccordTipo||'',
     tallaGabacha:FD.tallaGabacha||'', colorGabacha:FD.colorGabacha||'',
     gabColor:FD.gabColor||'', gabBord:FD.llevaBord||'No',
     tipoTela:FD.tipoTela||'', colorTela:FD.colorTela||'', yardas:FD.yardas||1,
@@ -5327,16 +5901,86 @@ function aplicarCliente(c){Object.assign(wData,{cliente:c.nombre,ubicacion:c.ubi
 setInterval(async ()=>{
   if(document.hidden) return;
   const activo=document.querySelector('.screen.show');
+  const chatAbierto=document.getElementById('chat-interno-panel')?.style.display==='flex';
+  if(chatAbierto) cargarChatInterno();
   if(!activo||activo.id==='s-login') return;
   await cargarPedidosDesdeSupabase();
   if(activo.id==='s-corte') renderCorte();
   else if(activo.id==='s-bordado') renderBordado();
+  else if(activo.id==='s-diseno') renderDiseno();
   else if(activo.id==='s-vendedor'&&document.getElementById('vt-enviados')?.style.display!=='none') renderEnviados();
   else if(activo.id==='s-admin'&&document.getElementById('at-p')?.style.display!=='none') renderAdminCorte();
+  else if(activo.id==='s-admin'&&document.getElementById('at-bo')?.style.display!=='none') renderAdminBordado();
 },25000);
+
+// == CHAT INTERNO (Admin, Corte, Bordado) ==
+let chatInternoMsgs=[];
+async function cargarChatInterno(){
+  try{
+    const {data,error}=await sb.from('chat_interno').select('*').order('created_at',{ascending:true}).limit(200);
+    if(error){console.error('Error cargando chat interno:',error);return;}
+    chatInternoMsgs=data||[];
+    renderChatInterno();
+  }catch(err){console.error('Error cargando chat interno:',err);}
+}
+async function enviarChatInterno(){
+  const inp=document.getElementById('chat-interno-input');
+  const texto=(inp?.value||'').trim();
+  if(!texto) return;
+  const autor=role==='a'?'Admin':role==='c'?'Corte':role==='b'?'Bordado':(role==='d'?'Diseñador':'Usuario');
+  inp.value='';
+  try{
+    const {error}=await sb.from('chat_interno').insert({autor,rol:role,texto});
+    if(error){console.error('Error enviando mensaje:',error);alert('No se pudo enviar el mensaje. Intenta de nuevo.');return;}
+    await cargarChatInterno();
+  }catch(err){console.error('Error enviando mensaje:',err);}
+}
+function renderChatInterno(){
+  const cont=document.getElementById('chat-interno-body');
+  if(!cont) return;
+  if(!chatInternoMsgs.length){
+    cont.innerHTML='<div style="text-align:center;color:#9ca3af;font-size:12px;padding:24px">Sin mensajes todavía. Escribe el primero 👋</div>';
+    return;
+  }
+  cont.innerHTML=chatInternoMsgs.map(m=>{
+    const mio=m.rol===role;
+    const txt=(m.texto||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const fecha=m.created_at?new Date(m.created_at).toLocaleString('es-MX',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+    return `<div style="margin-bottom:10px;text-align:${mio?'right':'left'}">
+      <div style="font-size:10px;color:#9ca3af;margin-bottom:2px">${m.autor||'—'} · ${fecha}</div>
+      <div style="display:inline-block;padding:8px 12px;border-radius:12px;background:${mio?'var(--blue)':'#e5e7eb'};color:${mio?'#fff':'#111827'};font-size:13px;max-width:85%;text-align:left;word-break:break-word">${txt}</div>
+    </div>`;
+  }).join('');
+  cont.scrollTop=cont.scrollHeight;
+}
+function toggleChatInterno(){
+  const panel=document.getElementById('chat-interno-panel');
+  if(!panel) return;
+  const abierto=panel.style.display==='flex';
+  panel.style.display=abierto?'none':'flex';
+  if(!abierto) cargarChatInterno();
+}
+function mostrarBotonChatInterno(mostrar){
+  const btn=document.getElementById('chat-interno-btn');
+  if(btn) btn.style.display=mostrar?'flex':'none';
+}
 
 // Init
 rWS();
 </script>
+
+<!-- Chat interno (Admin, Corte, Bordado) -->
+<button id="chat-interno-btn" onclick="toggleChatInterno()" style="display:none;position:fixed;bottom:20px;right:20px;width:54px;height:54px;border-radius:50%;background:var(--blue);color:#fff;border:none;box-shadow:0 4px 14px rgba(37,99,235,.4);font-size:22px;cursor:pointer;z-index:9999;align-items:center;justify-content:center">💬</button>
+<div id="chat-interno-panel" style="display:none;position:fixed;bottom:84px;right:20px;width:320px;max-width:90vw;height:420px;max-height:70vh;background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.25);z-index:9999;flex-direction:column;overflow:hidden;font-family:'Inter',sans-serif">
+  <div style="padding:12px 14px;background:var(--blue);color:#fff;font-weight:700;font-size:14px;display:flex;justify-content:space-between;align-items:center">
+    <span>💬 Chat interno</span>
+    <span style="cursor:pointer;font-size:16px" onclick="toggleChatInterno()">✕</span>
+  </div>
+  <div id="chat-interno-body" style="flex:1;overflow-y:auto;padding:12px;background:#f8fafc"></div>
+  <div style="display:flex;gap:6px;padding:10px;border-top:1px solid #e5e7eb">
+    <input id="chat-interno-input" type="text" placeholder="Escribe un mensaje..." style="flex:1;padding:9px 12px;border-radius:20px;border:1.5px solid #e2e7ef;outline:none;font-size:13px;font-family:'Inter',sans-serif" onkeydown="if(event.key==='Enter')enviarChatInterno()">
+    <button onclick="enviarChatInterno()" style="width:38px;height:38px;border-radius:50%;border:none;background:var(--blue);color:#fff;cursor:pointer;font-size:15px">➤</button>
+  </div>
+</div>
 </body>
 </html>
