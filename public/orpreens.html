@@ -1837,12 +1837,12 @@ function corteBotonesAccion(o,vendor,pedNum,itemIdx){
     let html='';
     if(necCamisa){
       html+=o.cortCamisa
-        ?`<button class="pbtn" style="background:#e5e7eb;color:#6b7280;cursor:default" disabled>✓ Camisa</button>`
+        ?`<button class="pbtn" style="background:#e5e7eb;color:#6b7280" onclick="marcarCorteParcial('${vendor}',${pedNum},${itemIdx},'camisa',true)" title="Toca para desmarcar">✓ Camisa</button>`
         :`<button class="pbtn pbtn-corte" onclick="marcarCorteParcial('${vendor}',${pedNum},${itemIdx},'camisa')">✂ Camisa</button>`;
     }
     if(necPant){
       html+=o.cortPant
-        ?`<button class="pbtn" style="background:#e5e7eb;color:#6b7280;cursor:default" disabled>✓ Pantalón</button>`
+        ?`<button class="pbtn" style="background:#e5e7eb;color:#6b7280" onclick="marcarCorteParcial('${vendor}',${pedNum},${itemIdx},'pant',true)" title="Toca para desmarcar">✓ Pantalón</button>`
         :`<button class="pbtn pbtn-corte" onclick="marcarCorteParcial('${vendor}',${pedNum},${itemIdx},'pant')">✂ Pantalón</button>`;
     }
     return html;
@@ -1851,12 +1851,12 @@ function corteBotonesAccion(o,vendor,pedNum,itemIdx){
   const nextP=nextPasoNum!==null?PASOS[nextPasoNum]:null;
   return nextP?`<button class="pbtn ${pbtnCls[nextPasoNum]||'pbtn-empaque'}" onclick="avanzarPaso('${vendor}',${pedNum},${itemIdx})">→${nextP.icon} ${nextP.label}</button>`:'';
 }
-function marcarCorteParcial(vendor,pedNum,itemIdx,parte){
+function marcarCorteParcial(vendor,pedNum,itemIdx,parte,desmarcar){
   const peds=pedidosVend[vendor]||[];
   const ped=peds.find(p=>p.num===pedNum);
   if(!ped) return;
   const o=ped.items[itemIdx];if(!o)return;
-  if(parte==='camisa') o.cortCamisa=true; else if(parte==='pant') o.cortPant=true;
+  if(parte==='camisa') o.cortCamisa=!desmarcar; else if(parte==='pant') o.cortPant=!desmarcar;
   const necCamisa=(!o.soloMitad||o.soloMitad==='top');
   const necPant=(!o.soloMitad||o.soloMitad==='pant');
   const listoCamisa=!necCamisa||o.cortCamisa;
@@ -1894,7 +1894,10 @@ function retrocederPaso(vendor,pedidoNum,itemIdx){
   const prev=anteriorPasoReal(o);
   if(prev===null)return;
   o.paso=prev;
+  if(prev===0){ o.cortCamisa=false; o.cortPant=false; }
   savePedidos();renderCorte();
+  if(typeof renderAdmin==='function') renderAdmin();
+  if(typeof renderAdminCorte==='function') renderAdminCorte();
 }
 
 // == CARRITO VENDEDOR ==
@@ -2294,7 +2297,7 @@ function renderCorte(){
     <div class="lista-stat"><b>${totalItems}</b> uniformes</div>
     ${PASOS.slice(1).map(p=>`<div class="lista-stat">${p.icon} <b>${pasoCounts[p.id]}</b> ${p.label}</div>`).join('')}`;
 
-  const isMobile=window.innerWidth<=768;
+  const isMobile=document.documentElement.clientWidth<=768;
   if(isMobile){
     // Vista card en móvil
     document.querySelector('#s-corte .table-wrap').innerHTML=allItems.map(o=>{
