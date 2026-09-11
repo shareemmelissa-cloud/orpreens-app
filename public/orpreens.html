@@ -1349,6 +1349,10 @@ async function borrarPedidosEnSupabase(){
 }
 
 // == PASOS DE PRODUCCIÓN ==
+// Prefijo de letra usado para códigos de item nuevos y nombres de lote (ej: 'J' en J.119, J.1, J.2...)
+let codPrefix = localStorage.getItem('orpreens_cod_prefix') || 'J';
+function saveCodPrefix(){ localStorage.setItem('orpreens_cod_prefix', codPrefix); }
+
 const PASOS=[
   {id:0,label:'Recibido',       icon:'',cls:'paso-0'},
   {id:1,label:'Cortado',          icon:'', cls:'paso-1'},
