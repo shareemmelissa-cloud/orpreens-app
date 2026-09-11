@@ -2,253 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="view
-// ══ CÓDIGOS DE ITEM ══
-function exportarExcelCorte(){
-  if(typeof XLSX==='undefined'){alert('No se pudo cargar la librería de Excel. Revisa tu conexión e intenta de nuevo.');return;}
-  const lote=prompt('Lote de corte (columna LIST, ej: J.2):','')||'';
-  const allPeds=getAllPedidos();
-  const headers=['LUG','LOGO','TEXTO','VEND','CLIENTE','SE','QT','PANT','STYLE','COLOR','DESCRIP. PANT','REM','CORD','CODIGO','LIST','STYLE','TOP2','COLOR','DESCRIPCION TOP','BORDA','AJUS/DE','COMISION','PRECIO'];
-  const filas=[headers];
-  allPeds.forEach(ped=>{
-    (ped.items||[]).forEach(o=>{
-      const tc=o.textoCount||1,lc=o.logoCount||1;
-      const textos=o.llevaTex==='Si'?[...Array(tc)].map((_,i)=>o['t'+(i+1)+'v']).filter(Boolean).join(', '):'';
-      const logos=o.llevaLog==='Si'?[...Array(lc)].map((_,i)=>o['l'+(i+1)+'n']).filter(Boolean).join(', '):'';
-      const llevaBorda=(o.llevaTex==='Si'||o.llevaLog==='Si')?'SI':'';
-      const pr=(typeof calcPrecio==='function')?calcPrecio(o):null;
-      filas.push([
-        o.ubicacion||'', logos, textos, o.vendor||ped.vendor||'', o.cliente||'',
-        o.sexo||'', o.cantidad||1,
-        o.tpant||'', o.spant||'', o.cpant||'', o.dpant||'',
-        o.crem||'', o.ccord||'', o.codigo||'', lote,
-        o.stop||'', o.ttop||'', o.ctop||'', o.dtop||'',
-        llevaBorda, '', '', pr?pr.total:''
-      ]);
-    });
-  });
-  const ws=XLSX.utils.aoa_to_sheet(filas);
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Corte');
-  const fecha=new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb,`CORTE_ORPREENS_${fecha}.xlsx`);
-}
-function siguienteCodigoUR(){
-  const todos=getAllPedidos().flatMap(p=>p.items||[]);
-  let max=0;
-  todos.forEach(o=>{
-    const m=/^UR(\d+)$/i.exec((o.codigo||'').trim());
-    if(m){const n=parseInt(m[1]);if(n>max)max=n;}
-  });
-  return 'UR'+(max+1);
-}
-function abrirModalUR(){
-  let m=document.getElementById('ur-modal');
-  if(!m){
-    m=document.createElement('div');
-    m.id='ur-modal';
-    m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px';
-    m.innerHTML=`<div style="background:#fff;border-radius:16px;padding:24px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-height:90vh;overflow-y:auto">
-      <div style="font-size:16px;font-weight:700;color:#dc2626;margin-bottom:4px">⚡ Nuevo pedido urgente (UR)</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:18px">Se le cobrará al vendedor que elijas. El código será <b id="ur-codigo-preview"></b> y aparecerá en rojo en la lista de Corte.</div>
-
-      <div class="lbl">Vendedor a quien se le cobrará</div>
-      <select id="ur-vendor" class="inp">${VENDORS.map(v=>`<option value="${v.code}">${v.code}</option>`).join('')}</select>
-
-      <div class="lbl">Cliente</div>
-      <input id="ur-cliente" class="inp" placeholder="Nombre del cliente">
-      <div class="lbl">Ubicación</div>
-      <input id="ur-ubicacion" class="inp" placeholder="Ej: Hospital, empresa...">
-      <div class="lbl">Sexo</div>
-      <select id="ur-sexo" class="inp"><option value="F">F</option><option value="H">H</option></select>
-      <div class="lbl">Cantidad</div>
-      <input id="ur-cantidad" class="inp" type="number" step="0.5" min="0.5" value="1">
-      <div class="lbl">¿Qué incluye?</div>
-      <select id="ur-solomitad" class="inp">
-        <option value="">Top y Pantalón</option>
-        <option value="top">Solo Top</option>
-        <option value="pant">Solo Pantalón</option>
-      </select>
-
-      <div id="ur-pant-block" style="margin-top:6px">
-        <div style="font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Pantalón</div>
-        <input id="ur-tpant" class="inp" placeholder="Talla pantalón">
-        <input id="ur-spant" class="inp" placeholder="Estilo pantalón">
-        <input id="ur-cpant" class="inp" placeholder="Color pantalón (código)">
-        <textarea id="ur-dpant" class="inp" style="min-height:50px" placeholder="Descripción extra pantalón"></textarea>
-      </div>
-      <div id="ur-top-block" style="margin-top:6px">
-        <div style="font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Top / Camisa</div>
-        <input id="ur-ttop" class="inp" placeholder="Talla top">
-        <input id="ur-stop" class="inp" placeholder="Estilo top">
-        <input id="ur-ctop" class="inp" placeholder="Color top (código)">
-        <textarea id="ur-dtop" class="inp" style="min-height:50px" placeholder="Descripción extra top"></textarea>
-      </div>
-
-      <div style="display:flex;gap:8px;margin-top:16px">
-        <button onclick="cerrarModalUR()" style="flex:1;padding:11px;border-radius:var(--radius-sm);border:1.5px solid var(--border2);background:#fff;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif">Cancelar</button>
-        <button onclick="guardarUR()" style="flex:1;padding:11px;border-radius:var(--radius-sm);border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif">Crear pedido UR</button>
-      </div>
-    </div>`;
-    document.body.appendChild(m);
-    m.addEventListener('click',ev=>{if(ev.target===m)cerrarModalUR();});
-    document.getElementById('ur-solomitad').addEventListener('change',function(){
-      const v=this.value;
-      document.getElementById('ur-pant-block').style.display=(v==='top')?'none':'';
-      document.getElementById('ur-top-block').style.display=(v==='pant')?'none':'';
-    });
-  }
-  document.getElementById('ur-codigo-preview').textContent=siguienteCodigoUR();
-  m.style.display='flex';
-}
-function cerrarModalUR(){
-  const m=document.getElementById('ur-modal');if(m)m.style.display='none';
-}
-function guardarUR(){
-  const vendor=document.getElementById('ur-vendor').value;
-  const cliente=document.getElementById('ur-cliente').value.trim();
-  if(!cliente){alert('Escribe el nombre del cliente.');return;}
-  const soloMitad=document.getElementById('ur-solomitad').value||null;
-  const codigo=siguienteCodigoUR();
-  const item={
-    codigo, cliente,
-    ubicacion:document.getElementById('ur-ubicacion').value.trim(),
-    sexo:document.getElementById('ur-sexo').value,
-    cantidad:parseFloat(document.getElementById('ur-cantidad').value)||1,
-    soloMitad,
-    tpant:document.getElementById('ur-tpant').value.trim().toUpperCase(),
-    spant:document.getElementById('ur-spant').value.trim().toUpperCase(),
-    cpant:document.getElementById('ur-cpant').value.trim().toUpperCase(),
-    dpant:document.getElementById('ur-dpant').value.trim().toUpperCase(),
-    ttop:document.getElementById('ur-ttop').value.trim().toUpperCase(),
-    stop:document.getElementById('ur-stop').value.trim().toUpperCase(),
-    ctop:document.getElementById('ur-ctop').value.trim().toUpperCase(),
-    dtop:document.getElementById('ur-dtop').value.trim().toUpperCase(),
-    paso:0, vendor, msgs:[], fotos:[]
-  };
-  const num=siguienteNumeroPedido(vendor);
-  const nuevoPedido={num,vendor,fecha:new Date().toLocaleDateString('es-HN'),items:[item]};
-  if(!pedidosVend[vendor]) pedidosVend[vendor]=[];
-  pedidosVend[vendor].push(nuevoPedido);
-  savePedidos();
-  cerrarModalUR();
-  alert('✓ Pedido urgente '+codigo+' creado y asignado a '+vendor+'.');
-  if(typeof renderAdminCorte==='function') renderAdminCorte();
-  if(typeof renderAdmin==='function') renderAdmin();
-}
-function solicitarPatron(vendor,pedNum,itemIdx){
-  const peds=pedidosVend[vendor]||[];
-  const ped=peds.find(p=>p.num===pedNum);
-  if(!ped) return;
-  const o=ped.items[itemIdx];if(!o)return;
-  const nota=prompt('¿Alguna nota para el diseñador? (opcional)','')||'';
-  o.patronPendiente=true;
-  o.patronNota=nota;
-  savePedidos();
-  renderCorte();
-  sb.from('chat_interno').insert({autor:'Corte (auto)',rol:'c',texto:`🧵 Se necesita patrón/diseño para ${o.codigo||'—'} · ${o.cliente||'—'} (Pedido #${pedNum}, ${vendor})${nota?' — Nota: '+nota:''}`}).then(()=>{}).catch(()=>{});
-}
-function marcarPatronListo(vendor,pedNum,itemIdx){
-  const peds=pedidosVend[vendor]||[];
-  const ped=peds.find(p=>p.num===pedNum);
-  if(!ped) return;
-  const o=ped.items[itemIdx];if(!o)return;
-  o.patronPendiente=false;
-  savePedidos();
-  renderDiseno();
-  sb.from('chat_interno').insert({autor:'Diseñador (auto)',rol:'d',texto:`✅ Patrón/diseño listo para ${o.codigo||'—'} · ${o.cliente||'—'} (Pedido #${pedNum}, ${vendor})`}).then(()=>{}).catch(()=>{});
-}
-function renderDiseno(){
-  const tbody=document.getElementById('diseno-tbody');
-  if(!tbody) return;
-  const allPeds=getAllPedidos();
-  const pendientes=[];
-  allPeds.forEach(ped=>{
-    (ped.items||[]).forEach((o,ii)=>{
-      if(o.patronPendiente) pendientes.push({...o,_pedNum:ped.num,_ii:ii,_vendor:ped.vendor});
-    });
-  });
-  if(!pendientes.length){
-    tbody.innerHTML='<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--muted2)">No hay solicitudes de patrón pendientes 🎉</td></tr>';
-    return;
-  }
-  tbody.innerHTML=pendientes.map(o=>`<tr>
-    <td><span class="cod-badge">${o.codigo||'—'}</span><br><span style="font-family:monospace;font-size:10px;color:#fcd34d">#${o._pedNum}</span></td>
-    <td><b>${o.cliente||'—'}</b></td>
-    <td><span class="${vtCls(o._vendor)}">${o._vendor||'—'}</span></td>
-    <td style="font-size:12px;color:#6b7280">${o.patronNota||'—'}</td>
-    <td><button class="pbtn pbtn-bordado" onclick="marcarPatronListo('${o._vendor}',${o._pedNum},${o._ii})">✓ Patrón listo</button></td>
-  </tr>`).join('');
-}
-
-function editarCodigoItem(vendor,pedNum,itemIdx){
-  const peds=pedidosVend[vendor]||[];
-  const ped=peds.find(p=>p.num===pedNum);
-  if(!ped||!ped.items[itemIdx])return;
-  const o=ped.items[itemIdx];
-  const actual=o.codigo||'';
-  const nuevo=prompt(`Editar código del item (Cliente: ${o.cliente||'—'})\n\nActual: ${actual}\n\nEscribe el nuevo código:`,actual);
-  if(nuevo===null)return;
-  const limpio=nuevo.trim().toUpperCase();
-  if(!limpio){alert('El código no puede estar vacío.');return;}
-  o.codigo=limpio;
-  savePedidos();
-  // Refresh whichever screen is active
-  if(document.getElementById('s-vendedor')?.classList.contains('show')) renderEnviados();
-  if(document.getElementById('s-corte')?.classList.contains('show')) renderCorte();
-  if(document.getElementById('s-bordado')?.classList.contains('show')) renderBordado();
-}
-
-function setCodPrefix(val){
-  const v=(val||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(!v)return;
-  codPrefix=v;
-  saveCodPrefix();
-}
-
-function actualizarPreviewReasig(){
-  const pref=(document.getElementById('reasi-prefix')?.value||'J').toUpperCase();
-  const ini=parseInt(document.getElementById('reasi-inicio')?.value)||119;
-  const prev=document.getElementById('reasi-preview');
-  if(prev) prev.textContent=`${pref}.${ini}, ${pref}.${ini+1}, ${pref}.${ini+2}...`;
-}
-
-function reasignarCodigos(){
-  const pref=(document.getElementById('reasi-prefix')?.value||'J').trim().toUpperCase();
-  const ini=parseInt(document.getElementById('reasi-inicio')?.value)||119;
-  if(!pref){alert('Escribe el prefijo.');return;}
-  const allPeds=getAllPedidos();
-  const total=allPeds.reduce((s,p)=>s+(p.items||[]).length,0);
-  if(!total){alert('No hay pedidos con items.');return;}
-  if(!confirm(`Se reasignarán los códigos de ${total} item(s).\n\nNueva secuencia: ${pref}.${ini}, ${pref}.${ini+1}...\n\n¿Continuar?`))return;
-  let counter=ini;
-  // Sort by pedido number to keep consistent order
-  allPeds.sort((a,b)=>{
-    const na=parseInt(String(a.num).replace(/\D/g,''))||0;
-    const nb=parseInt(String(b.num).replace(/\D/g,''))||0;
-    return na-nb;
-  });
-  // Reasignar directamente en pedidosVend (objeto en memoria)
-  allPeds.forEach(ped=>{
-    const vendorPeds=pedidosVend[ped.vendor]||[];
-    const pedRef=vendorPeds.find(p=>String(p.num)===String(ped.num));
-    if(!pedRef)return;
-    (pedRef.items||[]).forEach(item=>{
-      item.codigo=pref+'.'+counter;
-      counter++;
-    });
-  });
-  // Guardar con la función correcta
-  savePedidos();
-  // Actualizar prefijo
-  codPrefix=pref;
-  saveCodPrefix();
-  alert(`✓ ${total} códigos reasignados.\nÚltimo: ${pref}.${counter-1}\nPróximo nuevo: ${pref}.${counter}`);
-  renderAdmin();
-  renderCorte();
-  renderAjustes();
-}
-port" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sistema Orpreens</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -1074,6 +828,253 @@ table.corte-tbl tr.urgente-row td{border-left:3px solid var(--red)}
 const SUPABASE_URL='https://jnmguvnsuqqggvqqgltz.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpubWd1dm5zdXFxZ2d2cXFnbHR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5MjQyNTgsImV4cCI6MjEwNDUwMDI1OH0.vsP1bsuWta7TXYL1WxoxYjB4-w3TLG-8C1VwiOzp7LI';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+
+// ══ CÓDIGOS DE ITEM ══
+function exportarExcelCorte(){
+  if(typeof XLSX==='undefined'){alert('No se pudo cargar la librería de Excel. Revisa tu conexión e intenta de nuevo.');return;}
+  const lote=prompt('Lote de corte (columna LIST, ej: J.2):','')||'';
+  const allPeds=getAllPedidos();
+  const headers=['LUG','LOGO','TEXTO','VEND','CLIENTE','SE','QT','PANT','STYLE','COLOR','DESCRIP. PANT','REM','CORD','CODIGO','LIST','STYLE','TOP2','COLOR','DESCRIPCION TOP','BORDA','AJUS/DE','COMISION','PRECIO'];
+  const filas=[headers];
+  allPeds.forEach(ped=>{
+    (ped.items||[]).forEach(o=>{
+      const tc=o.textoCount||1,lc=o.logoCount||1;
+      const textos=o.llevaTex==='Si'?[...Array(tc)].map((_,i)=>o['t'+(i+1)+'v']).filter(Boolean).join(', '):'';
+      const logos=o.llevaLog==='Si'?[...Array(lc)].map((_,i)=>o['l'+(i+1)+'n']).filter(Boolean).join(', '):'';
+      const llevaBorda=(o.llevaTex==='Si'||o.llevaLog==='Si')?'SI':'';
+      const pr=(typeof calcPrecio==='function')?calcPrecio(o):null;
+      filas.push([
+        o.ubicacion||'', logos, textos, o.vendor||ped.vendor||'', o.cliente||'',
+        o.sexo||'', o.cantidad||1,
+        o.tpant||'', o.spant||'', o.cpant||'', o.dpant||'',
+        o.crem||'', o.ccord||'', o.codigo||'', lote,
+        o.stop||'', o.ttop||'', o.ctop||'', o.dtop||'',
+        llevaBorda, '', '', pr?pr.total:''
+      ]);
+    });
+  });
+  const ws=XLSX.utils.aoa_to_sheet(filas);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Corte');
+  const fecha=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`CORTE_ORPREENS_${fecha}.xlsx`);
+}
+function siguienteCodigoUR(){
+  const todos=getAllPedidos().flatMap(p=>p.items||[]);
+  let max=0;
+  todos.forEach(o=>{
+    const m=/^UR(\d+)$/i.exec((o.codigo||'').trim());
+    if(m){const n=parseInt(m[1]);if(n>max)max=n;}
+  });
+  return 'UR'+(max+1);
+}
+function abrirModalUR(){
+  let m=document.getElementById('ur-modal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='ur-modal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px';
+    m.innerHTML=`<div style="background:#fff;border-radius:16px;padding:24px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-height:90vh;overflow-y:auto">
+      <div style="font-size:16px;font-weight:700;color:#dc2626;margin-bottom:4px">⚡ Nuevo pedido urgente (UR)</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:18px">Se le cobrará al vendedor que elijas. El código será <b id="ur-codigo-preview"></b> y aparecerá en rojo en la lista de Corte.</div>
+
+      <div class="lbl">Vendedor a quien se le cobrará</div>
+      <select id="ur-vendor" class="inp">${VENDORS.map(v=>`<option value="${v.code}">${v.code}</option>`).join('')}</select>
+
+      <div class="lbl">Cliente</div>
+      <input id="ur-cliente" class="inp" placeholder="Nombre del cliente">
+      <div class="lbl">Ubicación</div>
+      <input id="ur-ubicacion" class="inp" placeholder="Ej: Hospital, empresa...">
+      <div class="lbl">Sexo</div>
+      <select id="ur-sexo" class="inp"><option value="F">F</option><option value="H">H</option></select>
+      <div class="lbl">Cantidad</div>
+      <input id="ur-cantidad" class="inp" type="number" step="0.5" min="0.5" value="1">
+      <div class="lbl">¿Qué incluye?</div>
+      <select id="ur-solomitad" class="inp">
+        <option value="">Top y Pantalón</option>
+        <option value="top">Solo Top</option>
+        <option value="pant">Solo Pantalón</option>
+      </select>
+
+      <div id="ur-pant-block" style="margin-top:6px">
+        <div style="font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Pantalón</div>
+        <input id="ur-tpant" class="inp" placeholder="Talla pantalón">
+        <input id="ur-spant" class="inp" placeholder="Estilo pantalón">
+        <input id="ur-cpant" class="inp" placeholder="Color pantalón (código)">
+        <textarea id="ur-dpant" class="inp" style="min-height:50px" placeholder="Descripción extra pantalón"></textarea>
+      </div>
+      <div id="ur-top-block" style="margin-top:6px">
+        <div style="font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Top / Camisa</div>
+        <input id="ur-ttop" class="inp" placeholder="Talla top">
+        <input id="ur-stop" class="inp" placeholder="Estilo top">
+        <input id="ur-ctop" class="inp" placeholder="Color top (código)">
+        <textarea id="ur-dtop" class="inp" style="min-height:50px" placeholder="Descripción extra top"></textarea>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button onclick="cerrarModalUR()" style="flex:1;padding:11px;border-radius:var(--radius-sm);border:1.5px solid var(--border2);background:#fff;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif">Cancelar</button>
+        <button onclick="guardarUR()" style="flex:1;padding:11px;border-radius:var(--radius-sm);border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:Inter,sans-serif">Crear pedido UR</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click',ev=>{if(ev.target===m)cerrarModalUR();});
+    document.getElementById('ur-solomitad').addEventListener('change',function(){
+      const v=this.value;
+      document.getElementById('ur-pant-block').style.display=(v==='top')?'none':'';
+      document.getElementById('ur-top-block').style.display=(v==='pant')?'none':'';
+    });
+  }
+  document.getElementById('ur-codigo-preview').textContent=siguienteCodigoUR();
+  m.style.display='flex';
+}
+function cerrarModalUR(){
+  const m=document.getElementById('ur-modal');if(m)m.style.display='none';
+}
+function guardarUR(){
+  const vendor=document.getElementById('ur-vendor').value;
+  const cliente=document.getElementById('ur-cliente').value.trim();
+  if(!cliente){alert('Escribe el nombre del cliente.');return;}
+  const soloMitad=document.getElementById('ur-solomitad').value||null;
+  const codigo=siguienteCodigoUR();
+  const item={
+    codigo, cliente,
+    ubicacion:document.getElementById('ur-ubicacion').value.trim(),
+    sexo:document.getElementById('ur-sexo').value,
+    cantidad:parseFloat(document.getElementById('ur-cantidad').value)||1,
+    soloMitad,
+    tpant:document.getElementById('ur-tpant').value.trim().toUpperCase(),
+    spant:document.getElementById('ur-spant').value.trim().toUpperCase(),
+    cpant:document.getElementById('ur-cpant').value.trim().toUpperCase(),
+    dpant:document.getElementById('ur-dpant').value.trim().toUpperCase(),
+    ttop:document.getElementById('ur-ttop').value.trim().toUpperCase(),
+    stop:document.getElementById('ur-stop').value.trim().toUpperCase(),
+    ctop:document.getElementById('ur-ctop').value.trim().toUpperCase(),
+    dtop:document.getElementById('ur-dtop').value.trim().toUpperCase(),
+    paso:0, vendor, msgs:[], fotos:[]
+  };
+  const num=siguienteNumeroPedido(vendor);
+  const nuevoPedido={num,vendor,fecha:new Date().toLocaleDateString('es-HN'),items:[item]};
+  if(!pedidosVend[vendor]) pedidosVend[vendor]=[];
+  pedidosVend[vendor].push(nuevoPedido);
+  savePedidos();
+  cerrarModalUR();
+  alert('✓ Pedido urgente '+codigo+' creado y asignado a '+vendor+'.');
+  if(typeof renderAdminCorte==='function') renderAdminCorte();
+  if(typeof renderAdmin==='function') renderAdmin();
+}
+function solicitarPatron(vendor,pedNum,itemIdx){
+  const peds=pedidosVend[vendor]||[];
+  const ped=peds.find(p=>p.num===pedNum);
+  if(!ped) return;
+  const o=ped.items[itemIdx];if(!o)return;
+  const nota=prompt('¿Alguna nota para el diseñador? (opcional)','')||'';
+  o.patronPendiente=true;
+  o.patronNota=nota;
+  savePedidos();
+  renderCorte();
+  sb.from('chat_interno').insert({autor:'Corte (auto)',rol:'c',texto:`🧵 Se necesita patrón/diseño para ${o.codigo||'—'} · ${o.cliente||'—'} (Pedido #${pedNum}, ${vendor})${nota?' — Nota: '+nota:''}`}).then(()=>{}).catch(()=>{});
+}
+function marcarPatronListo(vendor,pedNum,itemIdx){
+  const peds=pedidosVend[vendor]||[];
+  const ped=peds.find(p=>p.num===pedNum);
+  if(!ped) return;
+  const o=ped.items[itemIdx];if(!o)return;
+  o.patronPendiente=false;
+  savePedidos();
+  renderDiseno();
+  sb.from('chat_interno').insert({autor:'Diseñador (auto)',rol:'d',texto:`✅ Patrón/diseño listo para ${o.codigo||'—'} · ${o.cliente||'—'} (Pedido #${pedNum}, ${vendor})`}).then(()=>{}).catch(()=>{});
+}
+function renderDiseno(){
+  const tbody=document.getElementById('diseno-tbody');
+  if(!tbody) return;
+  const allPeds=getAllPedidos();
+  const pendientes=[];
+  allPeds.forEach(ped=>{
+    (ped.items||[]).forEach((o,ii)=>{
+      if(o.patronPendiente) pendientes.push({...o,_pedNum:ped.num,_ii:ii,_vendor:ped.vendor});
+    });
+  });
+  if(!pendientes.length){
+    tbody.innerHTML='<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--muted2)">No hay solicitudes de patrón pendientes 🎉</td></tr>';
+    return;
+  }
+  tbody.innerHTML=pendientes.map(o=>`<tr>
+    <td><span class="cod-badge">${o.codigo||'—'}</span><br><span style="font-family:monospace;font-size:10px;color:#fcd34d">#${o._pedNum}</span></td>
+    <td><b>${o.cliente||'—'}</b></td>
+    <td><span class="${vtCls(o._vendor)}">${o._vendor||'—'}</span></td>
+    <td style="font-size:12px;color:#6b7280">${o.patronNota||'—'}</td>
+    <td><button class="pbtn pbtn-bordado" onclick="marcarPatronListo('${o._vendor}',${o._pedNum},${o._ii})">✓ Patrón listo</button></td>
+  </tr>`).join('');
+}
+
+function editarCodigoItem(vendor,pedNum,itemIdx){
+  const peds=pedidosVend[vendor]||[];
+  const ped=peds.find(p=>p.num===pedNum);
+  if(!ped||!ped.items[itemIdx])return;
+  const o=ped.items[itemIdx];
+  const actual=o.codigo||'';
+  const nuevo=prompt(`Editar código del item (Cliente: ${o.cliente||'—'})\n\nActual: ${actual}\n\nEscribe el nuevo código:`,actual);
+  if(nuevo===null)return;
+  const limpio=nuevo.trim().toUpperCase();
+  if(!limpio){alert('El código no puede estar vacío.');return;}
+  o.codigo=limpio;
+  savePedidos();
+  // Refresh whichever screen is active
+  if(document.getElementById('s-vendedor')?.classList.contains('show')) renderEnviados();
+  if(document.getElementById('s-corte')?.classList.contains('show')) renderCorte();
+  if(document.getElementById('s-bordado')?.classList.contains('show')) renderBordado();
+}
+
+function setCodPrefix(val){
+  const v=(val||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!v)return;
+  codPrefix=v;
+  saveCodPrefix();
+}
+
+function actualizarPreviewReasig(){
+  const pref=(document.getElementById('reasi-prefix')?.value||'J').toUpperCase();
+  const ini=parseInt(document.getElementById('reasi-inicio')?.value)||119;
+  const prev=document.getElementById('reasi-preview');
+  if(prev) prev.textContent=`${pref}.${ini}, ${pref}.${ini+1}, ${pref}.${ini+2}...`;
+}
+
+function reasignarCodigos(){
+  const pref=(document.getElementById('reasi-prefix')?.value||'J').trim().toUpperCase();
+  const ini=parseInt(document.getElementById('reasi-inicio')?.value)||119;
+  if(!pref){alert('Escribe el prefijo.');return;}
+  const allPeds=getAllPedidos();
+  const total=allPeds.reduce((s,p)=>s+(p.items||[]).length,0);
+  if(!total){alert('No hay pedidos con items.');return;}
+  if(!confirm(`Se reasignarán los códigos de ${total} item(s).\n\nNueva secuencia: ${pref}.${ini}, ${pref}.${ini+1}...\n\n¿Continuar?`))return;
+  let counter=ini;
+  // Sort by pedido number to keep consistent order
+  allPeds.sort((a,b)=>{
+    const na=parseInt(String(a.num).replace(/\D/g,''))||0;
+    const nb=parseInt(String(b.num).replace(/\D/g,''))||0;
+    return na-nb;
+  });
+  // Reasignar directamente en pedidosVend (objeto en memoria)
+  allPeds.forEach(ped=>{
+    const vendorPeds=pedidosVend[ped.vendor]||[];
+    const pedRef=vendorPeds.find(p=>String(p.num)===String(ped.num));
+    if(!pedRef)return;
+    (pedRef.items||[]).forEach(item=>{
+      item.codigo=pref+'.'+counter;
+      counter++;
+    });
+  });
+  // Guardar con la función correcta
+  savePedidos();
+  // Actualizar prefijo
+  codPrefix=pref;
+  saveCodPrefix();
+  alert(`✓ ${total} códigos reasignados.\nÚltimo: ${pref}.${counter-1}\nPróximo nuevo: ${pref}.${counter}`);
+  renderAdmin();
+  renderCorte();
+  renderAjustes();
+}
+
 
 // Campos de un item que tienen su propia columna en la tabla "items".
 // Todo lo que NO esté en esta lista se guarda dentro de la columna "extra" (jsonb),
