@@ -3528,7 +3528,7 @@ function imprimirEtiquetas(vendor,pedNum){
 </style></head>
 <body>
 <div class="grid">${etiquetas.join('')}</div>
-<script>window.onload=()=>window.print();</script>
+<script>window.onload=()=>window.print();<\/script>
 </body></html>`;
   const w=window.open('','_blank');
   if(!w){alert('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes para este sitio.');return;}
