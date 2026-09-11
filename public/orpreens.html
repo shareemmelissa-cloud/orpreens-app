@@ -2322,8 +2322,8 @@ function renderCorte(){
         <div class="prod-card-body">
           <b>${o.cliente||'—'}</b> · ${o.ubicacion||'—'}<br>
           Cant: <b>${o.cantidad||1}${o.soloMitad?' ('+o.soloMitad+')':''}</b>
-          ${(!o.soloMitad||o.soloMitad==='pant')?`<br>P: <b>${o.tpant||'—'} ${o.spant||''}</b>${o.dpant?` <span style="color:var(--muted);font-size:10px">— ${o.dpant}</span>`:''}` :''}
-          ${(!o.soloMitad||o.soloMitad==='top')?`<br>T: <b>${o.ttop||'—'} ${o.stop||''}</b>${o.dtop?` <span style="color:var(--muted);font-size:10px">— ${o.dtop}</span>`:''}` :''}
+          ${(!o.soloMitad||o.soloMitad==='pant')?`<br>P: <b>${o.tpant||'—'} ${o.spant||''}</b> ${o.cpant?`<span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${hColor(o.cpant)};vertical-align:middle;border:1px solid rgba(0,0,0,.15);margin:0 2px"></span><span style="font-size:11px;color:var(--muted)">${o.cpant}</span>`:''}${o.dpant?`<br><span style="color:var(--muted);font-size:10px">📝 ${o.dpant}</span>`:''}` :''}
+          ${(!o.soloMitad||o.soloMitad==='top')?`<br>T: <b>${o.ttop||'—'} ${o.stop||''}</b> ${o.ctop?`<span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${hColor(o.ctop)};vertical-align:middle;border:1px solid rgba(0,0,0,.15);margin:0 2px"></span><span style="font-size:11px;color:var(--muted)">${o.ctop}</span>`:''}${o.dtop?`<br><span style="color:var(--muted);font-size:10px">📝 ${o.dtop}</span>`:''}` :''}
         </div>
         <div class="prod-card-actions">
           ${!terminado?corteBotonesAccion(o,cortePedActivo,o._pedNum,o._ii):''}
