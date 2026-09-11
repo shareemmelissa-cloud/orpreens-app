@@ -2021,20 +2021,17 @@ function renderCarrito(){
 function cambiarNumPedido(val){
   const v = String(val).trim().toUpperCase();
   if(!v) return;
-  const peds = getPedidos();
-  const ped = peds.find(p=>p.num===pedidoNum);
-  if(!ped) return;
-  // Verificar que no exista ya ese número
-  if(peds.some(p=>p.num!==pedidoNum && String(p.num).toUpperCase()===v)){
+  const carrito = getCarrito(cVend);
+  const yaEnviados = getPedidosVend(cVend);
+  if(yaEnviados.some(p=>String(p.num).toUpperCase()===v)){
     const inp=document.getElementById('num-inp');
     if(inp){inp.style.borderColor='var(--red)';inp.title='Ese número ya existe';}
     return;
   }
   const inp=document.getElementById('num-inp');
-  if(inp){inp.style.borderColor='var(--green)';}
-  ped.num = v;
-  pedidoNum = v;
-  savePedidos(peds);
+  if(inp){inp.style.borderColor='var(--green)';inp.title='';}
+  carrito.num = v;
+  saveCarrito(cVend,carrito);
   const nd=document.getElementById('num-display');if(nd)nd.textContent=v;
 }
 function delItem(i){const carrito=getCarrito(cVend);carrito.items.splice(i,1);saveCarrito(cVend,carrito);renderCarrito();}
