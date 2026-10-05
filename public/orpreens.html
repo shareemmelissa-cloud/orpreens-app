@@ -186,7 +186,7 @@ table.corte-tbl tr.en-corte b{color:#334155;}
 .estilo-card{border:1.5px solid var(--border);border-radius:var(--radius);background:#fff;cursor:pointer;overflow:hidden;transition:.15s;text-align:center;box-shadow:var(--shadow)}
 .estilo-card:hover{border-color:var(--blue);box-shadow:var(--shadow-md)}
 .estilo-card.sel{border-color:var(--blue);background:var(--blue-lt);box-shadow:0 0 0 2px rgba(37,99,235,.15)}
-.estilo-img{width:100%;aspect-ratio:1;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center}
+.estilo-img{width:100%;aspect-ratio:1;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center;position:relative}
 .estilo-img svg{width:32px;height:32px;color:var(--muted2)}
 .estilo-lbl{font-size:11px;font-weight:600;padding:7px 4px;color:var(--text2)}
 .estilo-card.sel .estilo-lbl{color:var(--blue)}
@@ -1143,11 +1143,30 @@ async function syncPedidosASupabase(){
     const idMap={};
     (pedRows||[]).forEach(r=>{idMap[r.vendor+'||'+r.numero]=r.id;});
     const filasItems=[];
+    const codigosUsados=new Set();
+    function codigoLibre(base){
+      let letraIdx=base.charCodeAt(0)-65, num=parseInt(base.slice(1))||1;
+      let candidato=base;
+      while(codigosUsados.has(candidato)){
+        num++;
+        if(num>999){letraIdx++;num=1;}
+        candidato=String.fromCharCode(65+letraIdx)+num;
+      }
+      return candidato;
+    }
     grupos.forEach(({vendor,numero,items})=>{
       const pedido_id=idMap[vendor+'||'+numero];
       if(!pedido_id) return;
       items.forEach(it=>{
         if(!it.codigo) return; // sin código todavía no se puede sincronizar de forma segura
+        if(codigosUsados.has(it.codigo)){
+          // Choque de códigos (ej: dos vendedores enviando casi al mismo tiempo).
+          // Se corrige automáticamente en vez de bloquear todo el envío.
+          const nuevo=codigoLibre(it.codigo);
+          console.warn(`Código duplicado detectado (${it.codigo}). Reasignado automáticamente a ${nuevo}.`);
+          it.codigo=nuevo;
+        }
+        codigosUsados.add(it.codigo);
         filasItems.push({...itemToRow(it),pedido_id});
       });
     });
@@ -1195,8 +1214,8 @@ async function cargarColoresRapidos(){
   try{
     const {data,error}=await sb.from('colores_rapidos').select('*').order('orden',{ascending:true});
     if(error){console.error('Error cargando colores rápidos:',error);return;}
-    REMATES_QUICK=(data||[]).filter(x=>x.tipo==='remate').map(x=>({c:x.codigo,h:x.hex||'#94a3b8',n:x.nombre,_id:x.id}));
-    CORDONES_QUICK=(data||[]).filter(x=>x.tipo==='cordon').map(x=>({c:x.codigo,h:x.hex||'#94a3b8',n:x.nombre,_id:x.id}));
+    REMATES_QUICK=(data||[]).filter(x=>x.tipo==='remate').map(x=>({c:x.codigo,h:x.hex||'#94a3b8',n:x.nombre,foto:x.foto||null,_id:x.id}));
+    CORDONES_QUICK=(data||[]).filter(x=>x.tipo==='cordon').map(x=>({c:x.codigo,h:x.hex||'#94a3b8',n:x.nombre,foto:x.foto||null,_id:x.id}));
   }catch(err){console.error('Error cargando colores rápidos:',err);}
 }
 cargarColoresRapidos();
@@ -1223,18 +1242,57 @@ async function borrarColorRapido(id){
     renderColoresRapidos();
   }catch(err){alert('Error borrando color.');}
 }
+async function renombrarColorRapido(id,nuevoNombre){
+  const nombre=nuevoNombre.trim();if(!nombre)return;
+  try{
+    const {error}=await sb.from('colores_rapidos').update({nombre}).eq('id',id);
+    if(error){console.error('Error renombrando color:',error);return;}
+    await cargarColoresRapidos();
+  }catch(err){console.error('Error renombrando color:',err);}
+}
+function triggerColorRapidoFoto(id){
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='image/*';
+  inp.onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+      const b64=ev.target.result;
+      try{
+        const {error}=await sb.from('colores_rapidos').update({foto:b64}).eq('id',id);
+        if(error){alert('No se pudo subir la foto: '+error.message);return;}
+        await cargarColoresRapidos();
+        renderColoresRapidos();
+      }catch(err){alert('Error subiendo la foto.');}
+    };
+    reader.readAsDataURL(file);
+  };
+  inp.click();
+}
 function renderColoresRapidos(){
   const cont=document.getElementById('colores-rapidos-body');
   if(!cont) return;
-  const fila=(tipo,lista)=>`
-    <div style="margin-bottom:18px">
-      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;text-transform:capitalize">Colores de ${tipo==='remate'?'remate':'cordón'}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        ${lista.length?lista.map(c=>`<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e7ef;font-size:12px">
-          <span style="width:12px;height:12px;border-radius:50%;background:${c.h};border:1px solid #ccc;display:inline-block"></span>
-          <b>${c.c}</b> — ${c.n}
-          <span style="cursor:pointer;color:#dc2626;font-weight:700;margin-left:4px" onclick="borrarColorRapido('${c._id}')" title="Borrar">✕</span>
-        </div>`).join(''):'<span style="color:var(--muted2);font-size:12px">Sin colores todavía.</span>'}
+  const seccion=(tipo,lista)=>`
+    <div style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">Colores de ${tipo==='remate'?'remate':'cordón'}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-bottom:12px">
+        ${lista.length?lista.map(c=>`<div style="background:#fff;border:1.5px solid var(--border);border-radius:12px;overflow:hidden;position:relative">
+          <span style="position:absolute;top:5px;right:5px;z-index:2;cursor:pointer;background:rgba(255,255,255,.9);color:#dc2626;font-weight:700;font-size:11px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center" onclick="borrarColorRapido('${c._id}')" title="Borrar">✕</span>
+          <div style="position:relative;aspect-ratio:1;background:${c.foto?'var(--bg3)':c.h};cursor:pointer;overflow:hidden" onclick="triggerColorRapidoFoto('${c._id}')" title="Toca para subir/cambiar foto">
+            ${c.foto
+              ?`<img src="${c.foto}" style="width:100%;height:100%;object-fit:cover">`
+              :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><span style="font-size:9px;color:rgba(0,0,0,.4);font-weight:700">Subir foto</span></div>`
+            }
+          </div>
+          <div style="padding:6px">
+            <input value="${c.n}" style="width:100%;border:none;border-bottom:1.5px solid transparent;background:transparent;font-size:11px;font-weight:700;color:var(--text);outline:none;padding:2px;font-family:Inter,sans-serif;text-align:center"
+              title="Editar nombre"
+              onfocus="this.style.borderBottomColor='var(--blue)'"
+              onblur="renombrarColorRapido('${c._id}',this.value);this.style.borderBottomColor='transparent'"
+              onkeydown="if(event.key==='Enter')this.blur()">
+            <div style="font-size:9px;color:var(--muted2);text-align:center">${c.c}</div>
+          </div>
+        </div>`).join(''):'<span style="color:var(--muted2);font-size:12px;grid-column:1/-1">Sin colores todavía.</span>'}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <input id="cr-${tipo}-cod" class="inp" style="margin-bottom:0;width:90px" placeholder="Código">
@@ -1243,7 +1301,7 @@ function renderColoresRapidos(){
         <button onclick="agregarColorRapido('${tipo}')" style="padding:0 16px;border-radius:8px;border:none;background:var(--blue);color:#fff;font-size:12px;font-weight:600;cursor:pointer">+ Agregar</button>
       </div>
     </div>`;
-  cont.innerHTML=fila('remate',REMATES_QUICK)+fila('cordon',CORDONES_QUICK);
+  cont.innerHTML=seccion('remate',REMATES_QUICK)+seccion('cordon',CORDONES_QUICK);
 }
 
 let lotesCache=[];
@@ -1435,6 +1493,7 @@ const VENDORS=[
   {code:'RSC-LP',loc:'Lempira',    pin:'9569'},
   {code:'UCENM', loc:'',           pin:'9903'},
   {code:'EDG-SP',loc:'S.P.S',      pin:'8735'},
+  {code:'JSR-PR',loc:'Progreso',   pin:'9936'},
 ];
 const ADMIN_PIN='1234';
 const CB_PIN='1978';
@@ -1446,7 +1505,7 @@ const TPANT=['5XS','5XS+C','4XS','4XS+C','3XS','3XS+C','2XS','2XS+C','XS','XS+C'
 const TTOP=['5XS','4XS','3XS','2XS','XS','S','M','L','XL','2XL','3XL','4XL','Talla especial'];
 const SP=['Beck','Slim','Jogger','Flare'];
 const STF=[{v:'HP',l:'Clásica HP'},{v:'MOCK',l:'Mock Neck'},{v:'SPORT',l:'Sport Tunic'},{v:'CROSS',l:'Cross Over'},{v:'PIP',l:'Clásica PIP'},{v:'3POCK',l:'3 Pockets'},{v:'CRICK',l:'Crick'},{v:'DAILY',l:'Daily'},{v:'LEAH',l:'LEAH'},{v:'JL23',l:'JL23'},{v:'BECK',l:'BECK'},{v:'Otro',l:'Otro'}];
-const STM=[{v:'OP',l:'Clásico OP'},{v:'2P',l:'Clásico 2P'},{v:'3P',l:'Clásico 3P'},{v:'CRICK',l:'Crick'},{v:'401',l:'401'},{v:'403',l:'403'},{v:'Otro',l:'Otro'}];
+const STM=[{v:'OP',l:'Clásico OP'},{v:'2P',l:'Clásico 2P'},{v:'3P',l:'Clásico 3P'},{v:'401',l:'401'},{v:'403',l:'403'},{v:'Otro',l:'Otro'}];
 
 // == ESTILOS — base + persistentes en localStorage ==
 const BASE_ESTILOS_F = [
@@ -1467,16 +1526,16 @@ const BASE_ESTILOS_M = [
   {v:'OP',   lbl:'Clásico OP',  img:'OP'},
   {v:'2P',   lbl:'Clásico 2P',  img:'2P'},
   {v:'3P',   lbl:'Clásico 3P',  img:'3P'},
-  {v:'CRICK',lbl:'Crick',       img:null},
   {v:'401',  lbl:'401',         img:null},
   {v:'403',  lbl:'403',         img:null},
   {v:'Otro', lbl:'Otro',        img:null},
 ];
 const BASE_ESTILOS_PANT = [
-  {v:'Beck',  lbl:'Beck',   img:null},
-  {v:'Slim',  lbl:'Slim',   img:null},
-  {v:'Jogger',lbl:'Jogger', img:null},
-  {v:'Flare', lbl:'Flare',  img:null},
+  {v:'Beck',    lbl:'Beck',   img:null, sexo:null},
+  {v:'Slim',    lbl:'Slim',   img:null, sexo:null},
+  {v:'Jogger-F',lbl:'Jogger', img:null, sexo:'F'},
+  {v:'Jogger-M',lbl:'Jogger', img:null, sexo:'M'},
+  {v:'Flare',   lbl:'Flare',  img:null, sexo:null},
 ];
 
 // Persistencia de estilos
@@ -1511,12 +1570,16 @@ function buildEstilosList(base, extraKey){
 
 function getESTILOS_F(){ return buildEstilosList(BASE_ESTILOS_F,'F'); }
 function getESTILOS_M(){ return buildEstilosList(BASE_ESTILOS_M,'M'); }
-function getESTILOS_PANT(){ return buildEstilosList(BASE_ESTILOS_PANT,'PANT'); }
+function getESTILOS_PANT(sexo){
+  const lista=buildEstilosList(BASE_ESTILOS_PANT,'PANT');
+  if(!sexo) return lista;
+  return lista.filter(e=>!e.sexo||e.sexo===sexo);
+}
 
 // Simple global functions - use these everywhere
 // getESTILOS_F(), getESTILOS_M(), getESTILOS_PANT() are defined above
 
-const UBS=['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Espalda','__otra__'];
+const UBS=['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Arriba de bolsa','__otra__'];
 const LOGOS_ESP=['CURLA','SOL','UNAH','ENFERMERIA'];
 const TG=['4XL','Talla especial'];
 const BECK_S=['Beck','Beck+Flare'];
@@ -1782,7 +1845,7 @@ async function doLogin(){
     const vo=VENDORS.find(x=>x.code===v);
     if(vo&&vo.pin&&pin!==vo.pin){err.textContent='Contraseña incorrecta.';err.style.display='block';document.getElementById('vpin').value='';return;}
     err.textContent='Cargando datos…';err.style.color='var(--muted)';err.style.display='block';
-    await cargarPedidosDesdeSupabase();
+    await Promise.all([cargarPedidosDesdeSupabase(),cargarPreciosDesdeSupabase()]);
     err.style.display='none';err.style.color='';
     cVend=v;const _vl=document.getElementById('vlabel');if(_vl)_vl.textContent=v;
     showScreen('s-vendedor');updateNotifBadge();renderCarrito();
@@ -1913,7 +1976,8 @@ function showEnvMsg(txt,ok){
   el.style.color=ok?'#6ee7b7':'#fca5a5';
   el.innerHTML=txt;
 }
-function doEnviar(){
+async function doEnviar(){
+  await cargarPedidosDesdeSupabase();
   const carrito=getCarrito(cVend);
   const items=carrito.items||[];
   if(!items.length){showEnvMsg('❌ No hay uniformes en el pedido.',false);return;}
@@ -2749,7 +2813,23 @@ let preciosDB = JSON.parse(localStorage.getItem('orpreens_precios_v3') || 'null'
     }
   }
 };
-function savePrecios(){ localStorage.setItem('orpreens_precios_v3', JSON.stringify(preciosDB)); }
+function savePrecios(){
+  localStorage.setItem('orpreens_precios_v3', JSON.stringify(preciosDB));
+  sb.from('config').upsert({clave:'precios',valor:preciosDB},{onConflict:'clave'}).then(({error})=>{
+    if(error) console.error('Error guardando precios en la nube:',error);
+  }).catch(err=>console.error('Error guardando precios en la nube:',err));
+}
+async function cargarPreciosDesdeSupabase(){
+  try{
+    const {data,error}=await sb.from('config').select('valor').eq('clave','precios').maybeSingle();
+    if(error){console.error('Error cargando precios de la nube:',error);return;}
+    if(data&&data.valor){
+      preciosDB=data.valor;
+      localStorage.setItem('orpreens_precios_v3', JSON.stringify(preciosDB));
+    }
+  }catch(err){console.error('Error cargando precios de la nube:',err);}
+}
+cargarPreciosDesdeSupabase();
 
 const TELAS_LABEL = {AH:'Stretch AH', P:'Poplin', FS:'Stretch FS'};
 const TIPOS_PRENDA = [
@@ -3340,7 +3420,7 @@ function openAddLogo(){
       <input id="al-hilos" class="inp" placeholder="Ej: Blanco, Dorado, Azul rey...">
 
       <div class="lbl">Ubicaciones frecuentes</div>
-      <input id="al-ubics" class="inp" placeholder="Ej: Pecho izq., Espalda, Manga...">
+      <input id="al-ubics" class="inp" placeholder="Ej: Pecho izq., Arriba de bolsa, Manga...">
 
       <div class="lbl">Notas adicionales</div>
       <textarea id="al-notas" class="inp" style="min-height:80px" placeholder="Detalles del bordado, instrucciones especiales, referencias de cliente..."></textarea>
@@ -3473,6 +3553,10 @@ function editarLogo(id){
 
 
 // == PDF / IMPRIMIR PEDIDO ==
+function abrevUbic(u){
+  const m={'Pecho izq.':'P.I','Pecho der.':'P.D','Manga der.':'M.D','Manga izq.':'M.I','Bolsa':'B','Arriba de bolsa':'A.B'};
+  return m[u]||u||'';
+}
 function imprimirEtiquetas(vendor,pedNum){
   const peds=pedidosVend[vendor]||[];
   const ped=peds.find(p=>String(p.num)===String(pedNum));
@@ -3485,8 +3569,14 @@ function imprimirEtiquetas(vendor,pedNum){
   const etiquetas=[];
   items.forEach(o=>{
     const tc=o.textoCount||1,lc=o.logoCount||1;
-    const textos=o.llevaTex==='Si'?[...Array(tc)].map((_,i)=>o['t'+(i+1)+'v']).filter(Boolean).join(', '):'';
-    const logos=o.llevaLog==='Si'?[...Array(lc)].map((_,i)=>o['l'+(i+1)+'n']).filter(Boolean).join(', '):'';
+    const textos=o.llevaTex==='Si'?[...Array(tc)].map((_,i)=>{
+      const v=o['t'+(i+1)+'v'],u=abrevUbic(o['t'+(i+1)+'u']);
+      return v?(u?`${u}: ${v}`:v):'';
+    }).filter(Boolean).join(', '):'';
+    const logos=o.llevaLog==='Si'?[...Array(lc)].map((_,i)=>{
+      const n=o['l'+(i+1)+'n'],u=abrevUbic(o['l'+(i+1)+'u']);
+      return n?(u?`${u}: ${n}`:n):'';
+    }).filter(Boolean).join(', '):'';
     const mostrarTop=!o.soloMitad||o.soloMitad==='top';
     const mostrarPant=!o.soloMitad||o.soloMitad==='pant';
     if(mostrarTop){
@@ -4806,6 +4896,15 @@ function removeExtraColor(cod,telaId){
 }
 
 // == INVENTARIO DE ESTILOS ==
+function getEstiloImgScale(v){ return (estilosMeta[v]&&estilosMeta[v].imgScale)||100; }
+function ajustarEstiloImgScale(v,delta){
+  if(!estilosMeta[v])estilosMeta[v]={};
+  const cur=estilosMeta[v].imgScale||100;
+  estilosMeta[v].imgScale=Math.max(30,Math.min(250,cur+delta));
+  saveEstilosMeta();
+  renderInventarioEstilos();
+  if(typeof reSec==='function')reSec();
+}
 function renderInventarioEstilos(){
   const el=document.getElementById('inv-estilos-body');if(!el)return;
   const sections=[
@@ -4814,7 +4913,7 @@ function renderInventarioEstilos(){
     {id:'PANT',label:'Pantalones',                base:BASE_ESTILOS_PANT},
   ];
   let html=`<div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px">Inventario de estilos</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:20px">Edita el nombre de cada estilo, sube su foto o agrega nuevos estilos.</div>`;
+    <div style="font-size:12px;color:var(--muted);margin-bottom:20px">Edita el nombre de cada estilo, sube su foto, ajusta su tamaño o agrega nuevos estilos.</div>`;
   html+=sections.map(sec=>{
     const all=[...sec.base,...(extraEstilos[sec.id]||[])];
     return `<div class="chart-wrap" style="margin-bottom:16px">
@@ -4826,19 +4925,25 @@ function renderInventarioEstilos(){
         ${all.map(e=>{
           const lbl=getEstiloLabel(e.v,e.lbl);
           const img=getEstiloImg(e.v,e.img||null);
+          const scale=getEstiloImgScale(e.v);
           const isExtra=(extraEstilos[sec.id]||[]).some(x=>x.v===e.v);
           return `<div style="background:#fff;border:1.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow);position:relative">
             ${isExtra?`<span style="position:absolute;top:6px;right:6px;z-index:2;background:var(--blue);color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:99px">NUEVO</span>`:''}
             <!-- Image area -->
             <div style="position:relative;aspect-ratio:1;background:var(--bg3);overflow:hidden;cursor:pointer" onclick="triggerEstiloImgUpload('${e.v}','${sec.id}')" title="Toca para cambiar la foto">
               ${img
-                ?`<img src="${img}" style="width:100%;height:100%;object-fit:cover">`
+                ?`<img src="${img}" style="width:${scale}%;height:${scale}%;object-fit:contain;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">`
                 :`<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span style="font-size:10px;font-weight:600">Subir foto</span></div>`
               }
               <div style="position:absolute;inset:0;background:rgba(37,99,235,.0);transition:.2s;display:flex;align-items:center;justify-content:center" onmouseover="this.style.background='rgba(37,99,235,.35)'" onmouseout="this.style.background='rgba(37,99,235,.0)'">
                 <div style="opacity:0;transition:.2s;color:#fff;font-size:11px;font-weight:700" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0">Cambiar foto</div>
               </div>
             </div>
+            ${img?`<div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:5px 6px 0">
+              <button onclick="event.stopPropagation();ajustarEstiloImgScale('${e.v}',-10)" title="Achicar" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--border);background:#fff;color:var(--muted);font-size:12px;line-height:1;cursor:pointer;padding:0">－</button>
+              <span style="font-size:9px;color:var(--muted2);min-width:28px;text-align:center">${scale}%</span>
+              <button onclick="event.stopPropagation();ajustarEstiloImgScale('${e.v}',10)" title="Agrandar" style="width:20px;height:20px;border-radius:5px;border:1px solid var(--border);background:#fff;color:var(--muted);font-size:12px;line-height:1;cursor:pointer;padding:0">＋</button>
+            </div>`:''}
             <!-- Name + code -->
             <div style="padding:8px">
               <input value="${lbl}" style="width:100%;border:none;border-bottom:1.5px solid transparent;background:transparent;font-size:12px;font-weight:700;color:var(--text);outline:none;padding:2px 3px;font-family:Inter,sans-serif;text-align:center"
@@ -5178,7 +5283,7 @@ function pickC(key,code){
   rWS();
 }
 function ubOpts(sel){
-  const BASE=['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Espalda'];
+  const BASE=['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Arriba de bolsa'];
   const esOtra=sel&&!BASE.includes(sel)&&sel!=='__otra__';
   return `<option value="">Ubicación...</option>${BASE.map(u=>`<option value="${u}" ${sel===u?'selected':''}>${u}</option>`).join('')}<option value="__otra__" ${(sel==='__otra__'||esOtra)?'selected':''}>Otra...</option>`;
 }
@@ -5391,8 +5496,8 @@ function sectionUniforme(iF){
       <!-- Estilo pantalón -->
       <div class="lbl" style="margin-bottom:6px">Estilo</div>
       <div class="estilo-grid" style="margin-bottom:12px">
-        ${getESTILOS_PANT().map(e=>`<div class="estilo-card ${ePant===e.v?'sel':''}" onclick="FD.spant='${e.v}';reSec()">
-          <div class="estilo-img">${e.resolvedImg?`<img src="${e.resolvedImg}" style="width:100%;height:100%;object-fit:cover">`:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>`}</div>
+        ${getESTILOS_PANT(FD.sexo).map(e=>`<div class="estilo-card ${ePant===e.v?'sel':''}" onclick="FD.spant='${e.v}';reSec()">
+          <div class="estilo-img">${e.resolvedImg?`<img src="${e.resolvedImg}" style="width:${getEstiloImgScale(e.v)}%;height:${getEstiloImgScale(e.v)}%;object-fit:contain;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">`:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>`}</div>
           <div class="estilo-lbl">${e.lbl}</div>
         </div>`).join('')}
       </div>
@@ -5434,7 +5539,7 @@ function sectionUniforme(iF){
         ${estilosTop.map(e=>{
           const imgSrc = e.resolvedImg || null;
           return `<div class="estilo-card ${eTop===e.v?'sel':''}" onclick="FD.stop='${e.v}';reSec()">
-            <div class="estilo-img">${imgSrc ? `<img src="${imgSrc}" style="width:100%;height:100%;object-fit:cover">` : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>`}</div>
+            <div class="estilo-img">${imgSrc ? `<img src="${imgSrc}" style="width:${getEstiloImgScale(e.v)}%;height:${getEstiloImgScale(e.v)}%;object-fit:contain;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)">` : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>`}</div>
             <div class="estilo-lbl">${e.lbl}</div>
           </div>`;
         }).join('')}
@@ -5481,7 +5586,7 @@ function sectionUniforme(iF){
     <div class="form-section-title"> Color de remates</div>
     <div class="chip-group">
       ${remOpts.map(r=>`<div class="chip ${cremTipo===r.c?'sel-green':''}" onclick="FD.cremTipo='${r.c}';FD.crem='${r.c}';reSec()">
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${r.h};vertical-align:middle;margin-right:4px;border:1px solid rgba(255,255,255,.3)"></span>${r.c} — ${r.n}
+        ${r.foto?`<img src="${r.foto}" style="display:inline-block;width:18px;height:18px;border-radius:4px;object-fit:cover;vertical-align:middle;margin-right:5px;border:1px solid rgba(0,0,0,.15)">`:`<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${r.h};vertical-align:middle;margin-right:4px;border:1px solid rgba(255,255,255,.3)"></span>`}${r.c} — ${r.n}
       </div>`).join('')}
       <div class="chip ${cremTipo==='OTRO'?'sel':''}" onclick="FD.cremTipo='OTRO';FD.crem='';reSec()">🎨 Otro color</div>
     </div>
@@ -5495,7 +5600,7 @@ function sectionUniforme(iF){
     <div class="form-section-title"> Color de cordones</div>
     <div class="chip-group">
       ${cordOpts.map(r=>`<div class="chip ${ccordTipo===r.c?'sel-green':''}" onclick="FD.ccordTipo='${r.c}';FD.ccord='${r.c}';reSec()">
-        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${r.h};vertical-align:middle;margin-right:4px;border:1px solid rgba(255,255,255,.3)"></span>${r.c} — ${r.n}
+        ${r.foto?`<img src="${r.foto}" style="display:inline-block;width:18px;height:18px;border-radius:4px;object-fit:cover;vertical-align:middle;margin-right:5px;border:1px solid rgba(0,0,0,.15)">`:`<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${r.h};vertical-align:middle;margin-right:4px;border:1px solid rgba(255,255,255,.3)"></span>`}${r.c} — ${r.n}
       </div>`).join('')}
       <div class="chip ${ccordTipo==='OTRO'?'sel':''}" onclick="FD.ccordTipo='OTRO';FD.ccord='';reSec()">🎨 Otro color</div>
     </div>
@@ -5608,9 +5713,9 @@ function bordadoDetalleHTML(){
             <select class="inp" style="margin-bottom:0;font-size:12px;padding:8px" onchange="FD['t${i}u']=this.value;reSec()">
               <option value="">Ubicación...</option>
               ${UBS.filter(u=>u!=='__otra__').map(u=>`<option value="${u}" ${FD['t'+i+'u']===u?'selected':''}>${u}</option>`).join('')}
-              <option value="__otra__" ${FD['t'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Espalda','','__otra__'].includes(FD['t'+i+'u'])&&FD['t'+i+'u'])?'selected':''}>Otra...</option>
+              <option value="__otra__" ${FD['t'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Arriba de bolsa','','__otra__'].includes(FD['t'+i+'u'])&&FD['t'+i+'u'])?'selected':''}>Otra...</option>
             </select>
-            ${(FD['t'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Espalda',''].includes(FD['t'+i+'u'])&&FD['t'+i+'u']))?`<input class="inp" style="margin-top:4px;margin-bottom:0;font-size:12px;padding:8px;font-weight:600" placeholder="Ej: Cuello, Cintura..." value="${FD['t'+i+'u']==='__otra__'?'':FD['t'+i+'u']||''}" oninput="FD['t${i}u']=this.value.toUpperCase()||'__otra__';this.value=this.value.toUpperCase()">`:``}
+            ${(FD['t'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Arriba de bolsa',''].includes(FD['t'+i+'u'])&&FD['t'+i+'u']))?`<input class="inp" style="margin-top:4px;margin-bottom:0;font-size:12px;padding:8px;font-weight:600" placeholder="Ej: Cuello, Cintura..." value="${FD['t'+i+'u']==='__otra__'?'':FD['t'+i+'u']||''}" oninput="FD['t${i}u']=this.value.toUpperCase()||'__otra__';this.value=this.value.toUpperCase()">`:``}
           </div>
           <div><div class="lbl" style="font-size:9px">Color hilo</div>
             <input class="inp" style="margin-bottom:0;font-size:12px;padding:8px" placeholder="Blanco, dorado..." value="${FD['t'+i+'c']||''}" oninput="FD['t${i}c']=this.value.toUpperCase();this.value=this.value.toUpperCase()">
@@ -5636,9 +5741,9 @@ function bordadoDetalleHTML(){
             <select class="inp" style="margin-bottom:0;font-size:12px;padding:8px" onchange="FD['l${i}u']=this.value;reSec()">
               <option value="">Ubicación...</option>
               ${UBS.filter(u=>u!=='__otra__').map(u=>`<option value="${u}" ${FD['l'+i+'u']===u?'selected':''}>${u}</option>`).join('')}
-              <option value="__otra__" ${FD['l'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Espalda','','__otra__'].includes(FD['l'+i+'u'])&&FD['l'+i+'u'])?'selected':''}>Otra...</option>
+              <option value="__otra__" ${FD['l'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Arriba de bolsa','','__otra__'].includes(FD['l'+i+'u'])&&FD['l'+i+'u'])?'selected':''}>Otra...</option>
             </select>
-            ${(FD['l'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Espalda',''].includes(FD['l'+i+'u'])&&FD['l'+i+'u']))?`<input class="inp" style="margin-top:4px;margin-bottom:0;font-size:12px;padding:8px;font-weight:600" placeholder="Ej: Cuello, Cintura..." value="${FD['l'+i+'u']==='__otra__'?'':FD['l'+i+'u']||''}" oninput="FD['l${i}u']=this.value.toUpperCase()||'__otra__';this.value=this.value.toUpperCase()">`:``}
+            ${(FD['l'+i+'u']==='__otra__'||(!['Pecho izq.','Pecho der.','Manga der.','Manga izq.','Bolsa','Arriba de bolsa',''].includes(FD['l'+i+'u'])&&FD['l'+i+'u']))?`<input class="inp" style="margin-top:4px;margin-bottom:0;font-size:12px;padding:8px;font-weight:600" placeholder="Ej: Cuello, Cintura..." value="${FD['l'+i+'u']==='__otra__'?'':FD['l'+i+'u']||''}" oninput="FD['l${i}u']=this.value.toUpperCase()||'__otra__';this.value=this.value.toUpperCase()">`:``}
           </div>
           <div><div class="lbl" style="font-size:9px">Color hilo</div>
             <input class="inp" style="margin-bottom:0;font-size:12px;padding:8px" placeholder="Blanco, azul..." value="${FD['l'+i+'c']||''}" oninput="FD['l${i}c']=this.value.toUpperCase();this.value=this.value.toUpperCase()">
